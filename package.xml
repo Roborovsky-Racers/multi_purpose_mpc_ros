@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>multi_purpose_mpc</name>
+  <name>multi_purpose_mpc_ros</name>
   <version>0.0.0</version>
-  <description>The multi_purpose_mpc package</description>
+  <description>The multi_purpose_mpc_ros package</description>
   <maintainer email="t.sato17123@gmail.com">Takashi Sato</maintainer>
   <license>TODO</license>
 

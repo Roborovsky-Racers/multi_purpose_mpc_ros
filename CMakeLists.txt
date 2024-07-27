@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5.0)
-project(multi_purpose_mpc)
+project(multi_purpose_mpc_ros)
 
 include(GNUInstallDirs)
 find_package(ament_cmake_auto REQUIRED)
