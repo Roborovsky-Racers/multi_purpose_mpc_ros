@@ -1,0 +1,7 @@
+<launch>
+
+  <node pkg="multi_purpose_mpc" exec="run.bash" output="screen" />
+
+  <node pkg="multi_purpose_mpc" exec="simulation.bash" output="screen" />
+
+</launch>
