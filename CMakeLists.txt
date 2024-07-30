@@ -38,5 +38,6 @@ endif()
 ament_auto_package(INSTALL_TO_SHARE
   launch
   resources
-  Multi-Purpose-MPC
+  config
+  multi_purpose_mpc_ros/multi_purpose_mpc
 )
