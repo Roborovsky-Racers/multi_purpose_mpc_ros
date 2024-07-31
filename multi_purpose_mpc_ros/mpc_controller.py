@@ -10,13 +10,15 @@ from scipy.sparse import dia_matrix
 import numpy as np
 
 # ROS 2
+import rclpy
 from rclpy.node import Node
 from ament_index_python.packages import get_package_share_directory
+from rclpy.clock import Clock, ClockType
 
 from nav_msgs.msg import Odometry
 
 # autoware
-from autoware_auto_control_msgs.msg import AckermannControlCommand
+from autoware_auto_control_msgs.msg import AckermannControlCommand, AckermannLateralCommand, LongitudinalCommand
 
 # Multi_Purpose_MPC
 from multi_purpose_mpc_ros.multi_purpose_mpc.src.map import Map, Obstacle
@@ -42,6 +44,10 @@ def file_exists(file_path: str) -> None:
     if not os.path.exists(file_path):
         raise FileNotFoundError("File not found: " + file_path)
 
+def array_to_ackermann_control_command(u: np.ndarray) -> AckermannControlCommand:
+    msg = AckermannControlCommand()
+    # TODO: Implement the conversion
+    return msg
 
 @dataclasses.dataclass
 class MPCConfig:
@@ -54,6 +60,7 @@ class MPCConfig:
     a_max: float
     ay_max: float
     delta_max: float
+    control_rate: float
 
 
 class MPCController:
@@ -64,6 +71,7 @@ class MPCController:
 
         self._node = node
         self._cfg = self._load_config(config_path)
+        self._odom: Optional[Odometry] = None
         self._initialize()
         self._setup_pub_sub()
 
@@ -73,17 +81,17 @@ class MPCController:
             cfg: NamedTuple = convert_to_namedtuple(yaml.safe_load(f)) # type: ignore
 
         # Check if the files exist
-        mandatory_files = [cfg.map.yaml_path, cfg.waypoints.csv_path]
+        mandatory_files = [cfg.map.yaml_path, cfg.waypoints.csv_path] # type: ignore
         for file_path in mandatory_files:
             file_exists(self.in_pkg_share(file_path))
         return cfg
 
     def _initialize(self) -> None:
         def create_ref_path() -> ReferencePath:
-            map = Map(self.in_pkg_share(self._cfg.map.yaml_path))
-            wp_x, wp_y = load_waypoints(self.in_pkg_share(self._cfg.waypoints.csv_path))
+            map = Map(self.in_pkg_share(self._cfg.map.yaml_path)) # type: ignore
+            wp_x, wp_y = load_waypoints(self.in_pkg_share(self._cfg.waypoints.csv_path)) # type: ignore
 
-            cfg_ref_path = self._cfg.reference_path
+            cfg_ref_path = self._cfg.reference_path # type: ignore
             return ReferencePath(
                 map,
                 wp_x,
@@ -94,18 +102,18 @@ class MPCController:
                 cfg_ref_path.circular)
 
         def create_obstacles() -> Optional[List[Obstacle]]:
-            use_csv_obstacles = self._cfg.obstacles.csv_path != ""
+            use_csv_obstacles = self._cfg.obstacles.csv_path != "" # type: ignore
             if use_csv_obstacles:
-                obstacles_file_path = self.in_pkg_share(self._cfg.obstacles.csv_path)
+                obstacles_file_path = self.in_pkg_share(self._cfg.obstacles.csv_path) # type: ignore
                 obs_x, obs_y = load_waypoints(obstacles_file_path)
                 obstacles = []
                 for cx, cy in zip(obs_x, obs_y):
-                    obstacles.append(Obstacle(cx=cx, cy=cy, radius=self._cfg.obstacles.radius))
+                    obstacles.append(Obstacle(cx=cx, cy=cy, radius=self._cfg.obstacles.radius)) # type: ignore
                 return obstacles
             else:
                 return None
         def create_car(ref_path: ReferencePath) -> BicycleModel:
-            cfg_model = self._cfg.bicycle_model
+            cfg_model = self._cfg.bicycle_model # type: ignore
             return BicycleModel(
                 ref_path,
                 cfg_model.length,
@@ -113,7 +121,7 @@ class MPCController:
                 cfg_model.Ts)
 
         def create_mpc(car: BicycleModel) -> Tuple[MPCConfig, MPC]:
-            cfg_mpc = self._cfg.mpc
+            cfg_mpc = self._cfg.mpc # type: ignore
             mpc_cfg = MPCConfig(
                 cfg_mpc.N,
                 sparse.diags(cfg_mpc.Q),
@@ -123,7 +131,8 @@ class MPCController:
                 cfg_mpc.a_min,
                 cfg_mpc.a_max,
                 cfg_mpc.ay_max,
-                np.deg2rad(cfg_mpc.delta_max_deg))
+                np.deg2rad(cfg_mpc.delta_max_deg),
+                cfg_mpc.control_rate)
 
             state_constraints = {
                 "xmin": np.array([-np.inf, -np.inf, -np.inf]),
@@ -155,13 +164,33 @@ class MPCController:
         compute_speed_profile(self._car, self._mpc_cfg)
 
     def _setup_pub_sub(self) -> None:
-        self._pub = self._node.create_publisher(
+        self._command_pub = self._node.create_publisher(
             AckermannControlCommand, "/control/command/control_cmd", 1)
-        self._sub = self._node.create_subscription(
+        self._odom_sub = self._node.create_subscription(
             Odometry, "/localization/kinematic_state", self._odom_callback, 1)
 
     def _odom_callback(self, msg):
-        print("received odom: ", msg)
+        self._odom = msg
+
+    def _wait_until_odom_received(self, timeout: float = 30.) -> None:
+        t_start = Clock(clock_type=ClockType.ROS_TIME).now()
+        rate = self._node.create_rate(30)
+        while self._odom is None:
+            now = Clock(clock_type=ClockType.ROS_TIME).now()
+            if (now - t_start).nanoseconds < timeout * 1e9:
+                raise TimeoutError("Timeout while waiting for odometry message")
+            rate.sleep()
+
+    def run(self) -> None:
+        self._wait_until_odom_received()
+        control_rate = self._node.create_rate(self._mpc_cfg.control_rate)
+
+        while rclpy.ok():
+            u: np.ndarray = self._mpc.get_control()
+            self._car.drive(u)
+            self._command_pub.publish(array_to_ackermann_control_command(u))
+
+            control_rate.sleep()
 
     @classmethod
     def in_pkg_share(cls, file_path: str) -> str:

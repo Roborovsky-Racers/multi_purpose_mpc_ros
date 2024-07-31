@@ -34,5 +34,6 @@ mpc:
   a_max: 3.2 # m/s^2
   ay_max: 20.0 # m/s^2, maximum lateral acceleration in curves
   delta_max_deg: 60.0 # degrees
+  control_rate: 50.0 # Hz
 
 

@@ -11,7 +11,7 @@ from rclpy.signals import SignalHandlerOptions
 from multi_purpose_mpc_ros.mpc_controller import MPCController
 
 def parse_args_without_ros(argv):
-    args_without_ros = rclpy.utilities.remove_ros_args(argv)
+    args_without_ros = rclpy.utilities.remove_ros_args(argv) # type: ignore
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--config_path", type=str, required=True,
                         help="Path to the config.yaml file")
@@ -22,7 +22,7 @@ def main(argv = sys.argv) -> None:
 
     args = parse_args_without_ros(argv)
     rclpy.init(args=argv, signal_handler_options=SignalHandlerOptions.NO)
-    node = rclpy.create_node("mpc_controller")
+    node = rclpy.create_node("mpc_controller") # type: ignore
     controller = MPCController(node, args.config_path)
 
 
