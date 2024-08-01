@@ -9,6 +9,7 @@ waypoints:
 obstacles:
   # path from pkg share dir
   csv_path: "" # If empty, the obstacles information will be subscribed from the topic
+  csv_path: "multi_purpose_mpc/src/maps/occupancy_grid_map_obstacles.csv"
   radius: 1.0
 
 reference_path:

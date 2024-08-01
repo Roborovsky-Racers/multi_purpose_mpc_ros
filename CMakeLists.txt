@@ -11,8 +11,9 @@ ament_python_install_package(${PROJECT_NAME}
 
 install(PROGRAMS
   scripts/run_mpc_controller.bash
-  scripts/simulation.bash
+  scripts/run_mpc_simulation.bash
   scripts/mpc_controller
+  scripts/mpc_simulation
   DESTINATION lib/${PROJECT_NAME}
 )
 
