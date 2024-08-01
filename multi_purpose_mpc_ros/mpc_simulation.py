@@ -37,6 +37,7 @@ class MPCSimulation:
 
         logger = self._controller.get_logger()
         sim_logger = SimulationLogger(
+            logger,
             car.temporal_state.x, car.temporal_state.y, SHOW_SIM_ANIMATION, SHOW_PLOT_ANIMATION, PLOT_RESULTS, ANIMATION_INTERVAL)
 
         t = 0.0
@@ -84,7 +85,7 @@ class MPCSimulation:
                 lap_times.append(lap_time)
                 next_lap_start = False
 
-                print(f'Lap {len(lap_times)} completed! Lap time: {lap_time} s')
+                logger.info(f'Lap {len(lap_times)} completed! Lap time: {lap_time} s')
 
             # LAPインクリメント直後にゴール付近WPを最近傍WPとして認識してしまうと、 s>=lengthとなり
             # 次の周回がすぐに終了したと判定されてしまう場合があるため、

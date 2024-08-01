@@ -1,3 +1,4 @@
+from rclpy.impl.rcutils_logger import RcutilsLogger
 import numpy as np
 import matplotlib.pyplot as plt
 from multi_purpose_mpc_ros.multi_purpose_mpc.src.MPC import MPC
@@ -6,6 +7,7 @@ from multi_purpose_mpc_ros.multi_purpose_mpc.src.utils import format_time, m_per
 class SimulationLogger:
     def __init__(
             self,
+            logger: RcutilsLogger,
             init_x: float,
             init_y: float,
             show_sim_animation: bool,
@@ -13,6 +15,7 @@ class SimulationLogger:
             plot_results: bool,
             animation_interval: bool):
 
+        self._logger = logger
         self._show_sim_animation = show_sim_animation
         self._show_plot_animation = show_plot_animation
         self._plot_results = plot_results
@@ -106,16 +109,16 @@ class SimulationLogger:
         ave_lap_time = total_time / len(lap_times) if len(lap_times) > 0 else 0
         fastest_lap_time = min(lap_times) if len(lap_times) > 0 else 0
 
-        print("#########################################")
-        print("Simulation finished!")
-        print(f"       Total laps: {len(lap_times)}")
-        print(f"       Total time: {format_time(total_time)} s")
-        print(f" Average Lap time: {format_time(ave_lap_time)} s")
-        print(f" Fastest Lap time: {format_time(fastest_lap_time)} s")
-        print("-----------------------------------------")
+        self._logger.info("#########################################")
+        self._logger.info("Simulation finished!")
+        self._logger.info(f"       Total laps: {len(lap_times)}")
+        self._logger.info(f"       Total time: {format_time(total_time)} s")
+        self._logger.info(f" Average Lap time: {format_time(ave_lap_time)} s")
+        self._logger.info(f" Fastest Lap time: {format_time(fastest_lap_time)} s")
+        self._logger.info("-----------------------------------------")
         for i, lap_time in enumerate(lap_times):
-            print(f"       Lap {i+1} time: {format_time(lap_time)} s")
-        print("#########################################")
+            self._logger.info(f"       Lap {i+1} time: {format_time(lap_time)} s")
+        self._logger.info("#########################################")
 
         if self._plot_results:
             if self.stop_requested or not self._show_sim_animation or not self._show_plot_animation:
