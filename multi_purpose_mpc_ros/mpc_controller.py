@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 
-import os
 import yaml
-from collections import namedtuple
-from typing import List, Tuple, Optional, NamedTuple, Dict, Union
+from typing import List, Tuple, Optional, NamedTuple
 import dataclasses
 from scipy import sparse
 from scipy.sparse import dia_matrix
@@ -27,22 +25,8 @@ from multi_purpose_mpc_ros.core.spatial_bicycle_models import BicycleModel
 from multi_purpose_mpc_ros.core.MPC import MPC
 from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec
 
-# 再帰的に dict を namedtuple に変換する関数
-def convert_to_namedtuple(
-        data: Union[Dict, List, NamedTuple, float, str, bool],
-        tuple_name="Config"
-        ) -> Union[Dict, List, NamedTuple, float, str, bool]:
-    if isinstance(data, dict):
-        fields = {key: convert_to_namedtuple(value, key) for key, value in data.items()}
-        return namedtuple(tuple_name, fields.keys())(**fields)
-    elif isinstance(data, list):
-        return [convert_to_namedtuple(item, tuple_name) for item in data]
-    else:
-        return data
-
-def file_exists(file_path: str) -> None:
-    if not os.path.exists(file_path):
-        raise FileNotFoundError("File not found: " + file_path)
+# Project
+from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
 
 def array_to_ackermann_control_command(u: np.ndarray) -> AckermannControlCommand:
     msg = AckermannControlCommand()
@@ -68,7 +52,7 @@ class MPCController(Node):
     PKG_PATH: str = get_package_share_directory('multi_purpose_mpc_ros') + "/"
 
     def __init__(self, config_path: str) -> None:
-        super().__init__("mpc_controller")
+        super().__init__("mpc_controller") # type: ignore
 
         self._cfg = self._load_config(config_path)
         self._odom: Optional[Odometry] = None
@@ -87,7 +71,7 @@ class MPCController(Node):
 
     def _initialize(self) -> None:
         def create_map() -> Map:
-            return Map(self.in_pkg_share(self._cfg.map.yaml_path))
+            return Map(self.in_pkg_share(self._cfg.map.yaml_path)) # type: ignore
 
         def create_ref_path(map: Map) -> ReferencePath:
             wp_x, wp_y = load_waypoints(self.in_pkg_share(self._cfg.waypoints.csv_path)) # type: ignore
