@@ -269,7 +269,7 @@ class MPCController(Node):
             # print(f"mpc x: {self._mpc.model.temporal_state.x}, y: {self._mpc.model.temporal_state.y}, psi: {self._mpc.model.temporal_state.psi}")
 
             u: np.ndarray = self._mpc.get_control()
-            self.get_logger().info(f"u: {u}")
+            # self.get_logger().info(f"u: {u}")
 
             if len(u) == 0:
                 self.get_logger().error("No control signal")
@@ -277,6 +277,9 @@ class MPCController(Node):
 
             self._car.drive(u)
             self._command_pub.publish(array_to_ackermann_control_command(now.to_msg(), u, self._cfg.mpc.a_max))
+
+            # Log states
+            sim_logger.log(self._car, u, t)
 
             sim_logger.plot_animation(t, 0, lap_times, u, self._mpc, self._car)
 

@@ -32,7 +32,7 @@ def main(argv = sys.argv) -> None:
         for node in executor._nodes:
             node.destroy_node()
         executor.shutdown()
-        executor._executor.shutdown()
+        # executor._executor.shutdown()
 
 
 if __name__ == "__main__":
