@@ -1,8 +1,8 @@
 from rclpy.impl.rcutils_logger import RcutilsLogger
 import numpy as np
 import matplotlib.pyplot as plt
-from multi_purpose_mpc_ros.multi_purpose_mpc.src.MPC import MPC
-from multi_purpose_mpc_ros.multi_purpose_mpc.src.utils import format_time, m_per_sec_to_kmh
+from multi_purpose_mpc_ros.core.MPC import MPC
+from multi_purpose_mpc_ros.core.utils import format_time, m_per_sec_to_kmh
 
 class SimulationLogger:
     def __init__(
@@ -13,7 +13,7 @@ class SimulationLogger:
             show_sim_animation: bool,
             show_plot_animation: bool,
             plot_results: bool,
-            animation_interval: bool):
+            animation_interval: int):
 
         self._logger = logger
         self._show_sim_animation = show_sim_animation
