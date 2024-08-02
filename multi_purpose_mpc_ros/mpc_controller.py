@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 
-import os
 import yaml
-from collections import namedtuple
-from typing import List, Tuple, Optional, NamedTuple, Dict, Union
+from typing import List, Tuple, Optional, NamedTuple
 import dataclasses
 from scipy import sparse
 from scipy.sparse import dia_matrix
@@ -17,6 +15,7 @@ from rclpy.clock import Clock, ClockType
 from rclpy.parameter import Parameter
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
+from std_msgs.msg import Bool
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Quaternion, Pose, Pose2D
 
@@ -24,31 +23,15 @@ from geometry_msgs.msg import Quaternion, Pose, Pose2D
 from autoware_auto_control_msgs.msg import AckermannControlCommand, AckermannLateralCommand, LongitudinalCommand
 
 # Multi_Purpose_MPC
-from multi_purpose_mpc_ros.multi_purpose_mpc.src.map import Map, Obstacle
-from multi_purpose_mpc_ros.multi_purpose_mpc.src.reference_path import ReferencePath
-from multi_purpose_mpc_ros.multi_purpose_mpc.src.spatial_bicycle_models import BicycleModel
-from multi_purpose_mpc_ros.multi_purpose_mpc.src.MPC import MPC
-from multi_purpose_mpc_ros.multi_purpose_mpc.src.utils import load_waypoints, kmh_to_m_per_sec
+from multi_purpose_mpc_ros.core.map import Map, Obstacle
+from multi_purpose_mpc_ros.core.reference_path import ReferencePath
+from multi_purpose_mpc_ros.core.spatial_bicycle_models import BicycleModel
+from multi_purpose_mpc_ros.core.MPC import MPC
+from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec
 
 # Project
+from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
 from multi_purpose_mpc_ros.simulation_logger import SimulationLogger
-
-# 再帰的に dict を namedtuple に変換する関数
-def convert_to_namedtuple(
-        data: Union[Dict, List, NamedTuple, float, str, bool],
-        tuple_name="Config"
-        ) -> Union[Dict, List, NamedTuple, float, str, bool]:
-    if isinstance(data, dict):
-        fields = {key: convert_to_namedtuple(value, key) for key, value in data.items()}
-        return namedtuple(tuple_name, fields.keys())(**fields)
-    elif isinstance(data, list):
-        return [convert_to_namedtuple(item, tuple_name) for item in data]
-    else:
-        return data
-
-def file_exists(file_path: str) -> None:
-    if not os.path.exists(file_path):
-        raise FileNotFoundError("File not found: " + file_path)
 
 def array_to_ackermann_control_command(stamp, u: np.ndarray, a_max: float) -> AckermannControlCommand:
     msg = AckermannControlCommand()
@@ -106,10 +89,11 @@ class MPCController(Node):
     PKG_PATH: str = get_package_share_directory('multi_purpose_mpc_ros') + "/"
 
     def __init__(self, config_path: str) -> None:
-        super().__init__("mpc_controller")
+        super().__init__("mpc_controller") # type: ignore
 
         self._cfg = self._load_config(config_path)
         self._odom: Optional[Odometry] = None
+        self._enable_control = False
         self._initialize()
         self._setup_pub_sub()
 
@@ -119,9 +103,6 @@ class MPCController(Node):
 
         # wait for clock received
         rclpy.spin_once(self, timeout_sec=1)
-
-        self._group = MutuallyExclusiveCallbackGroup()
-        self._timer = self.create_timer(1.0 / self._cfg.mpc.control_rate, self._run, self._group)
 
     def destroy(self) -> None:
         self._timer.destroy()
@@ -142,7 +123,7 @@ class MPCController(Node):
 
     def _initialize(self) -> None:
         def create_map() -> Map:
-            return Map(self.in_pkg_share(self._cfg.map.yaml_path))
+            return Map(self.in_pkg_share(self._cfg.map.yaml_path)) # type: ignore
 
         def create_ref_path(map: Map) -> ReferencePath:
             wp_x, wp_y = load_waypoints(self.in_pkg_share(self._cfg.waypoints.csv_path)) # type: ignore
@@ -223,11 +204,19 @@ class MPCController(Node):
     def _setup_pub_sub(self) -> None:
         self._command_pub = self.create_publisher(
             AckermannControlCommand, "/control/command/control_cmd", 1)
+
         self._odom_sub = self.create_subscription(
-            Odometry, "/localization/kinematic_state", self._odom_callback, 1)
+            Odometry, "localization/kinematic_state", self._odom_callback, 1)
+        self._control_mode_request_sub = self.create_subscription(
+            Bool, "control/control_mode_request_topic", self._control_mode_request_callback, 1)
 
     def _odom_callback(self, msg):
         self._odom = msg
+
+    def _control_mode_request_callback(self, msg):
+        if msg.data:
+            self.get_logger().info("Control mode request received")
+            self._enable_control = True
 
     def _wait_until_odom_received(self, timeout: float = 30.) -> None:
         t_start = self.get_clock().now()
@@ -239,8 +228,18 @@ class MPCController(Node):
                 raise TimeoutError("Timeout while waiting for odometry message")
             rate.sleep()
 
-    def _run(self) -> None:
+    def _wait_until_control_mode_request_received(self, timeout: float = 240.) -> None:
+        t_start = self.get_clock().now()
+        rate = self.create_rate(30)
+        while not self._enable_control:
+            now = self.get_clock().now()
+            if (now - t_start).nanoseconds > timeout * 1e9:
+                raise TimeoutError("Timeout while waiting for control mode request message")
+            rate.sleep()
+
+    def run(self) -> None:
         self._wait_until_odom_received()
+        self._wait_until_control_mode_request_received()
         control_rate = self.create_rate(self._mpc_cfg.control_rate)
 
         pose = odom_to_pose_2d(self._odom)
@@ -270,13 +269,13 @@ class MPCController(Node):
             # print(f"mpc x: {self._mpc.model.temporal_state.x}, y: {self._mpc.model.temporal_state.y}, psi: {self._mpc.model.temporal_state.psi}")
 
             u: np.ndarray = self._mpc.get_control()
-            # self.get_logger().info(f"u: {u}")
+            self.get_logger().info(f"u: {u}")
 
             if len(u) == 0:
                 self.get_logger().error("No control signal")
                 control_rate.sleep()
 
-            self._car.drive(u, pose.x, pose.y, pose.theta)
+            self._car.drive(u)
             self._command_pub.publish(array_to_ackermann_control_command(now.to_msg(), u, self._cfg.mpc.a_max))
 
             sim_logger.plot_animation(t, 0, lap_times, u, self._mpc, self._car)
