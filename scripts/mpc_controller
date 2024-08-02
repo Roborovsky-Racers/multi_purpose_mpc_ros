@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 
 import sys
-import argparse
+import threading
 
 # ROS 2
 import rclpy
-from rclpy.signals import SignalHandlerOptions
+from rclpy.executors import MultiThreadedExecutor
 
 # Project
 from multi_purpose_mpc_ros.mpc_controller import MPCController
@@ -16,9 +16,15 @@ def main(argv = sys.argv) -> None:
 
     args = parse_args_without_ros(argv)
     rclpy.init(args=argv)
+    executor = MultiThreadedExecutor()
+
     try:
         node = MPCController(args.config_path)
-        rclpy.spin(node)
+        executor.add_node(node)
+        executor_thread = threading.Thread(target=executor.spin)
+        executor_thread.start()
+        node.run()
+
     except KeyboardInterrupt:
         node.get_logger().info("Shutdown requested")
     finally:

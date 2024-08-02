@@ -150,10 +150,15 @@ class MPCController(Node):
         compute_speed_profile(self._car, self._mpc_cfg)
 
     def _setup_pub_sub(self) -> None:
+        # self._command_pub = self.create_publisher(
+        #     AckermannControlCommand, "/control/command/control_cmd", 1)
+        # FIXME: Use the dummy topic for now
         self._command_pub = self.create_publisher(
-            AckermannControlCommand, "/control/command/control_cmd", 1)
+            AckermannControlCommand, "/control/command/dummy_control_cmd", 1)
+
         self._odom_sub = self.create_subscription(
-            Odometry, "/localization/kinematic_state", self._odom_callback, 1)
+            Odometry, "localization/kinematic_state", self._odom_callback, 1)
+
 
     def _odom_callback(self, msg):
         self._odom = msg
@@ -163,7 +168,7 @@ class MPCController(Node):
         rate = self.create_rate(30)
         while self._odom is None:
             now = Clock(clock_type=ClockType.ROS_TIME).now()
-            if (now - t_start).nanoseconds < timeout * 1e9:
+            if (now - t_start).nanoseconds > timeout * 1e9:
                 raise TimeoutError("Timeout while waiting for odometry message")
             rate.sleep()
 
