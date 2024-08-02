@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from typing import List
+from typing import List, Optional
 
 # ROS 2
 import rclpy
@@ -28,9 +28,11 @@ class MPCSimulation:
 
         mpc: MPC = self._controller._mpc
         map: Map = self._controller._map
-        obstacles: List[Obstacle] = self._controller._obstacles
         car: BicycleModel = mpc.model
 
+        obstacles: Optional[List[Obstacle]] = self._controller._obstacles
+        if obstacles is None:
+            obstacles = []
         obstacle_manager = ObstacleManager(map, obstacles)
 
         logger = self._controller.get_logger()

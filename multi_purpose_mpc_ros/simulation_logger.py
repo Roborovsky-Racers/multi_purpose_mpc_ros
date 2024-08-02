@@ -13,7 +13,7 @@ class SimulationLogger:
             show_sim_animation: bool,
             show_plot_animation: bool,
             plot_results: bool,
-            animation_interval: bool):
+            animation_interval: int):
 
         self._logger = logger
         self._show_sim_animation = show_sim_animation

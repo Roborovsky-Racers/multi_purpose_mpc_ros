@@ -1,10 +1,11 @@
+from typing import List
 import random
 
 # Multi_Purpose_MPC
 from multi_purpose_mpc_ros.core.map import Map, Obstacle
 
 class ObstacleManager:
-    def __init__(self, map: Map, obstacles: Obstacle):
+    def __init__(self, map: Map, obstacles: List[Obstacle]):
         self.map = map
         self.obstacles = obstacles
 
