@@ -1,0 +1,40 @@
+map:
+  # path from pkg share dir
+  yaml_path: "multi_purpose_mpc/src/maps/occupancy_grid_map.yaml"
+
+waypoints:
+  # path from pkg share dir
+  csv_path: "multi_purpose_mpc/src/maps/occupancy_grid_map_waypoints.csv"
+
+obstacles:
+  # path from pkg share dir
+  csv_path: "" # If empty, the obstacles information will be subscribed from the topic
+  csv_path: "multi_purpose_mpc/src/maps/occupancy_grid_map_obstacles.csv"
+  radius: 1.0
+
+reference_path:
+  # path from pkg share dir
+  csv_path: ""
+  resolution: 1.0
+  smoothing_distance: 10
+  max_width: 4.5
+  circular: true
+
+bicycle_model:
+  length: 1.087
+  width: 1.45
+  Ts: 0.05
+
+mpc:
+  N: 30
+  Q: [3.0, 1.5, 5.0]
+  R: [0.0, 10.0]
+  QN: [3.0, 1.5, 5.0]
+  v_max: 30.0 # km/h
+  a_min: -3.2 # m/s^2
+  a_max: 3.2 # m/s^2
+  ay_max: 20.0 # m/s^2, maximum lateral acceleration in curves
+  delta_max_deg: 60.0 # degrees
+  control_rate: 50.0 # Hz
+
+

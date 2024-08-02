@@ -10,8 +10,10 @@ ament_python_install_package(${PROJECT_NAME}
 )
 
 install(PROGRAMS
-  scripts/run.bash
-  scripts/simulation.bash
+  scripts/run_mpc_controller.bash
+  scripts/run_mpc_simulation.bash
+  scripts/mpc_controller
+  scripts/mpc_simulation
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -37,5 +39,6 @@ endif()
 ament_auto_package(INSTALL_TO_SHARE
   launch
   resources
-  Multi-Purpose-MPC
+  config
+  multi_purpose_mpc_ros/multi_purpose_mpc
 )
