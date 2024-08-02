@@ -21,11 +21,11 @@ from nav_msgs.msg import Odometry
 from autoware_auto_control_msgs.msg import AckermannControlCommand, AckermannLateralCommand, LongitudinalCommand
 
 # Multi_Purpose_MPC
-from multi_purpose_mpc_ros.multi_purpose_mpc.src.map import Map, Obstacle
-from multi_purpose_mpc_ros.multi_purpose_mpc.src.reference_path import ReferencePath
-from multi_purpose_mpc_ros.multi_purpose_mpc.src.spatial_bicycle_models import BicycleModel
-from multi_purpose_mpc_ros.multi_purpose_mpc.src.MPC import MPC
-from multi_purpose_mpc_ros.multi_purpose_mpc.src.utils import load_waypoints, kmh_to_m_per_sec
+from multi_purpose_mpc_ros.core.map import Map, Obstacle
+from multi_purpose_mpc_ros.core.reference_path import ReferencePath
+from multi_purpose_mpc_ros.core.spatial_bicycle_models import BicycleModel
+from multi_purpose_mpc_ros.core.MPC import MPC
+from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec
 
 # 再帰的に dict を namedtuple に変換する関数
 def convert_to_namedtuple(

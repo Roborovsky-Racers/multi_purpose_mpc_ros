@@ -37,8 +37,8 @@ if(install_result)
 endif()
 
 ament_auto_package(INSTALL_TO_SHARE
-  launch
-  resources
   config
-  multi_purpose_mpc_ros/multi_purpose_mpc
+  launch
+  maps
+  resources
 )

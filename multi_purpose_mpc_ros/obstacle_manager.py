@@ -1,7 +1,7 @@
 import random
 
 # Multi_Purpose_MPC
-from multi_purpose_mpc_ros.multi_purpose_mpc.src.map import Map, Obstacle
+from multi_purpose_mpc_ros.core.map import Map, Obstacle
 
 class ObstacleManager:
     def __init__(self, map: Map, obstacles: Obstacle):

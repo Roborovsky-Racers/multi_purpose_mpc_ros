@@ -5,13 +5,11 @@ from typing import List
 # ROS 2
 import rclpy
 
-# Multi_Purpose_MPC
-from multi_purpose_mpc_ros.multi_purpose_mpc.src.map import Map, Obstacle
-from multi_purpose_mpc_ros.multi_purpose_mpc.src.MPC import MPC
-
 # Project
+from multi_purpose_mpc_ros.core.map import Map, Obstacle
+from multi_purpose_mpc_ros.core.MPC import MPC
+from multi_purpose_mpc_ros.core.spatial_bicycle_models import BicycleModel
 from multi_purpose_mpc_ros.mpc_controller import MPCController
-from multi_purpose_mpc_ros.multi_purpose_mpc.src.spatial_bicycle_models import BicycleModel
 from multi_purpose_mpc_ros.simulation_logger import SimulationLogger
 from multi_purpose_mpc_ros.obstacle_manager import ObstacleManager
 
