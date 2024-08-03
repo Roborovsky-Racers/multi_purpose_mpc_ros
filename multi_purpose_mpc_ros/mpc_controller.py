@@ -12,8 +12,12 @@ import rclpy
 from rclpy.node import Node
 from ament_index_python.packages import get_package_share_directory
 from rclpy.clock import Clock, ClockType
+from rclpy.parameter import Parameter
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
+from std_msgs.msg import Bool
 from nav_msgs.msg import Odometry
+from geometry_msgs.msg import Quaternion, Pose, Pose2D
 
 # autoware
 from autoware_auto_control_msgs.msg import AckermannControlCommand, AckermannLateralCommand, LongitudinalCommand
@@ -27,11 +31,44 @@ from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec
 
 # Project
 from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
+from multi_purpose_mpc_ros.simulation_logger import SimulationLogger
 
-def array_to_ackermann_control_command(u: np.ndarray) -> AckermannControlCommand:
+def array_to_ackermann_control_command(stamp, u: np.ndarray, a_max: float) -> AckermannControlCommand:
     msg = AckermannControlCommand()
-    # TODO: Implement the conversion
+    msg.stamp = stamp
+    msg.lateral.stamp = stamp
+    msg.lateral.steering_tire_angle = u[1]
+    msg.lateral.steering_tire_rotation_rate = 2.0
+    msg.longitudinal.stamp = stamp
+    msg.longitudinal.speed = u[0]
+    msg.longitudinal.acceleration = a_max
     return msg
+
+def yaw_from_quaternion(q: Quaternion):
+    sqx = q.x * q.x
+    sqy = q.y * q.y
+    sqz = q.z * q.z
+    sqw = q.w * q.w
+
+    # Cases derived from https://orbitalstation.wordpress.com/tag/quaternion/
+    sarg = -2 * (q.x*q.z - q.w*q.y) / (sqx + sqy + sqz + sqw) # normalization added from urdfom_headers
+
+    if sarg <= -0.99999:
+        yaw = -2. * np.arctan2(q.y, q.x)
+    elif sarg >= 0.99999:
+        yaw = 2. * np.arctan2(q.y, q.x)
+    else:
+        yaw = np.arctan2(2. * (q.x*q.y + q.w*q.z), sqw + sqx - sqy - sqz)
+
+    return yaw
+
+def odom_to_pose_2d(odom: Odometry) -> Pose2D:
+    pose = Pose2D()
+    pose.x = odom.pose.pose.position.x
+    pose.y = odom.pose.pose.position.y
+    pose.theta = yaw_from_quaternion(odom.pose.pose.orientation)
+
+    return pose
 
 @dataclasses.dataclass
 class MPCConfig:
@@ -56,8 +93,23 @@ class MPCController(Node):
 
         self._cfg = self._load_config(config_path)
         self._odom: Optional[Odometry] = None
+        self._enable_control = False
         self._initialize()
         self._setup_pub_sub()
+
+        # set use_sim_time parameter
+        param = Parameter("use_sim_time", Parameter.Type.BOOL, True)
+        self.set_parameters([param])
+
+        # wait for clock received
+        rclpy.spin_once(self, timeout_sec=1)
+
+    def destroy(self) -> None:
+        self._timer.destroy()
+        self._command_pub.shutdown()
+        self._odom_sub.shutdown()
+        self._group.destroy()
+        super().destroy_node()
 
     def _load_config(self, config_path: str) -> NamedTuple:
         with open(config_path, "r") as f:
@@ -150,38 +202,117 @@ class MPCController(Node):
         compute_speed_profile(self._car, self._mpc_cfg)
 
     def _setup_pub_sub(self) -> None:
-        # self._command_pub = self.create_publisher(
-        #     AckermannControlCommand, "/control/command/control_cmd", 1)
-        # FIXME: Use the dummy topic for now
         self._command_pub = self.create_publisher(
-            AckermannControlCommand, "/control/command/dummy_control_cmd", 1)
+            AckermannControlCommand, "/control/command/control_cmd", 1)
 
         self._odom_sub = self.create_subscription(
             Odometry, "localization/kinematic_state", self._odom_callback, 1)
-
+        self._control_mode_request_sub = self.create_subscription(
+            Bool, "control/control_mode_request_topic", self._control_mode_request_callback, 1)
 
     def _odom_callback(self, msg):
         self._odom = msg
 
+    def _control_mode_request_callback(self, msg):
+        if msg.data:
+            self.get_logger().info("Control mode request received")
+            self._enable_control = True
+
     def _wait_until_odom_received(self, timeout: float = 30.) -> None:
-        t_start = Clock(clock_type=ClockType.ROS_TIME).now()
+        t_start = self.get_clock().now()
+        self.get_logger().info(f"t_start: {t_start}")
         rate = self.create_rate(30)
         while self._odom is None:
-            now = Clock(clock_type=ClockType.ROS_TIME).now()
+            now = self.get_clock().now()
             if (now - t_start).nanoseconds > timeout * 1e9:
                 raise TimeoutError("Timeout while waiting for odometry message")
             rate.sleep()
 
+    def _wait_until_control_mode_request_received(self, timeout: float = 240.) -> None:
+        t_start = self.get_clock().now()
+        rate = self.create_rate(30)
+        while not self._enable_control:
+            now = self.get_clock().now()
+            if (now - t_start).nanoseconds > timeout * 1e9:
+                raise TimeoutError("Timeout while waiting for control mode request message")
+            rate.sleep()
+
     def run(self) -> None:
         self._wait_until_odom_received()
+        self._wait_until_control_mode_request_received()
         control_rate = self.create_rate(self._mpc_cfg.control_rate)
 
-        while rclpy.ok():
+        pose = odom_to_pose_2d(self._odom)
+        self._car.update_states(pose.x, pose.y, pose.theta)
+        self._car.update_reference_path(self._car.reference_path)
+
+        sim_logger = SimulationLogger(
+            self.get_logger(),
+            self._car.temporal_state.x, self._car.temporal_state.y, True, False, True, 50)
+
+        self.get_logger().info(f"START!")
+
+        loop = 0
+        lap_times = []
+        next_lap_start = True
+        MAX_LAPS=6
+
+        t_start = self.get_clock().now()
+        while rclpy.ok() and (not sim_logger.stop_requested()) and len(lap_times) < MAX_LAPS:
+            loop += 1
+            now = self.get_clock().now()
+            t = (now - t_start).nanoseconds / 1e9
+
+            pose = odom_to_pose_2d(self._odom)
+            self._car.update_states(pose.x, pose.y, pose.theta)
+            # print(f"car x: {self._car.temporal_state.x}, y: {self._car.temporal_state.y}, psi: {self._car.temporal_state.psi}")
+            # print(f"mpc x: {self._mpc.model.temporal_state.x}, y: {self._mpc.model.temporal_state.y}, psi: {self._mpc.model.temporal_state.psi}")
+
             u: np.ndarray = self._mpc.get_control()
+            # self.get_logger().info(f"u: {u}")
+
+            if len(u) == 0:
+                self.get_logger().error("No control signal")
+                control_rate.sleep()
+
             self._car.drive(u)
-            self._command_pub.publish(array_to_ackermann_control_command(u))
+            self._command_pub.publish(array_to_ackermann_control_command(now.to_msg(), u, self._cfg.mpc.a_max))
+
+            # Log states
+            sim_logger.log(self._car, u, t)
+
+            sim_logger.plot_animation(t, 0, lap_times, u, self._mpc, self._car)
+
+            # Push next obstacle
+            if loop % 50 == 0:
+                # obstacle_manager.push_next_obstacle_random()
+
+                # update reference path
+                # 現在は、同じコースを何周もするだけ
+                # (コースの途中で reference_path を更新してもOK)
+                self._car.update_reference_path(self._car.reference_path)
+
+            # Check if a lap has been completed
+            if next_lap_start and self._car.s >= self._car.reference_path.length:
+                if len(lap_times) > 0:
+                    lap_time = t - sum(lap_times)
+                else:
+                    lap_time = t
+                lap_times.append(lap_time)
+                next_lap_start = False
+
+                self.get_logger().info(f'Lap {len(lap_times)} completed! Lap time: {lap_time} s')
+
+            # LAPインクリメント直後にゴール付近WPを最近傍WPとして認識してしまうと、 s>=lengthとなり
+            # 次の周回がすぐに終了したと判定されてしまう場合があるため、
+            # 誤判定防止のために少しだけ余計に走行した後に次の周回が開始したと判定する
+            if not next_lap_start and self._car.s < self._car.reference_path.length / 10.0:
+                next_lap_start = True
 
             control_rate.sleep()
+
+        # show results
+        sim_logger.show_results(lap_times, self._car)
 
     @classmethod
     def in_pkg_share(cls, file_path: str) -> str:

@@ -1,3 +1,0 @@
-[submodule "multi_purpose_mpc_ros/multi_purpose_mpc"]
-	path = multi_purpose_mpc_ros/multi_purpose_mpc
-	url = git@github.com:Roborovsky-Racers/Multi-Purpose-MPC.git

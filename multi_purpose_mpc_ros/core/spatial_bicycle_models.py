@@ -392,6 +392,17 @@ class BicycleModel(SpatialBicycleModel):
         # Update the distance s along the reference path based on the closest waypoint
         self.s = self.get_s_at_waypoint(self.wp_id)
 
+    def update_states(self, x, y, psi):
+        self.temporal_state.x = x
+        self.temporal_state.y = y
+        self.temporal_state.psi = psi
+
+        # Update the current waypoint based on the new reference path
+        self.wp_id = self.get_closest_waypoint(self.temporal_state.x, self.temporal_state.y)
+
+        # Update the distance s along the reference path based on the closest waypoint
+        self.s = self.get_s_at_waypoint(self.wp_id)
+
     def get_temporal_derivatives(self, state, input, kappa):
         """
         Compute relevant temporal derivatives needed for state update.
