@@ -11,16 +11,14 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from ament_index_python.packages import get_package_share_directory
-from rclpy.clock import Clock, ClockType
 from rclpy.parameter import Parameter
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Float64MultiArray
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Quaternion, Pose, Pose2D
+from geometry_msgs.msg import Quaternion, Pose2D
 
 # autoware
-from autoware_auto_control_msgs.msg import AckermannControlCommand, AckermannLateralCommand, LongitudinalCommand
+from autoware_auto_control_msgs.msg import AckermannControlCommand
 
 # Multi_Purpose_MPC
 from multi_purpose_mpc_ros.core.map import Map, Obstacle
@@ -105,10 +103,11 @@ class MPCController(Node):
         rclpy.spin_once(self, timeout_sec=1)
 
     def destroy(self) -> None:
-        self._timer.destroy()
-        self._command_pub.shutdown()
-        self._odom_sub.shutdown()
-        self._group.destroy()
+        self._timer.destroy() # type: ignore
+        self._command_pub.shutdown() # type: ignore
+        self._odom_sub.shutdown() # type: ignore
+        self._obstacles_sub.shutdown() # type: ignore
+        self._group.destroy() # type: ignore
         super().destroy_node()
 
     def _load_config(self, config_path: str) -> NamedTuple:
@@ -149,6 +148,7 @@ class MPCController(Node):
                 return obstacles
             else:
                 return None
+
         def create_car(ref_path: ReferencePath) -> BicycleModel:
             cfg_model = self._cfg.bicycle_model # type: ignore
             return BicycleModel(
@@ -201,17 +201,38 @@ class MPCController(Node):
         self._mpc_cfg, self._mpc = create_mpc(self._car)
         compute_speed_profile(self._car, self._mpc_cfg)
 
+        # Obstacles
+        self._use_obstacles_topic = self._obstacles is None
+        self._obstacles_updated = False
+        self._last_obstacles_msgs_raw = None
+
     def _setup_pub_sub(self) -> None:
+        # Publishers
         self._command_pub = self.create_publisher(
             AckermannControlCommand, "/control/command/control_cmd", 1)
 
+        # Subscribers
         self._odom_sub = self.create_subscription(
-            Odometry, "localization/kinematic_state", self._odom_callback, 1)
+            Odometry, "/localization/kinematic_state", self._odom_callback, 1)
+        self._obstacles_sub = self.create_subscription(
+            Float64MultiArray, "/aichallenge/objects", self._obstacles_callback, 1)
         self._control_mode_request_sub = self.create_subscription(
             Bool, "control/control_mode_request_topic", self._control_mode_request_callback, 1)
 
-    def _odom_callback(self, msg):
+    def _odom_callback(self, msg: Odometry) -> None:
         self._odom = msg
+
+    def _obstacles_callback(self, msg: Float64MultiArray) -> None:
+        if not self._use_obstacles_topic:
+            return
+
+        self._obstacles_updated = self._last_obstacles_msgs_raw == msg.data
+        if self._obstacles_updated:
+            self._last_obstacles_msgs_raw = msg.data
+            for i in range(0, len(msg.data), 4):
+                x = msg.data[i]
+                y = msg.data[i + 1]
+                self._obstacles.append(Obstacle(cx=x, cy=y, radius=self._cfg.obstacles.radius)) # type: ignore
 
     def _control_mode_request_callback(self, msg):
         if msg.data:
@@ -242,7 +263,7 @@ class MPCController(Node):
         self._wait_until_control_mode_request_received()
         control_rate = self.create_rate(self._mpc_cfg.control_rate)
 
-        pose = odom_to_pose_2d(self._odom)
+        pose = odom_to_pose_2d(self._odom) # type: ignore
         self._car.update_states(pose.x, pose.y, pose.theta)
         self._car.update_reference_path(self._car.reference_path)
 
@@ -263,7 +284,14 @@ class MPCController(Node):
             now = self.get_clock().now()
             t = (now - t_start).nanoseconds / 1e9
 
-            pose = odom_to_pose_2d(self._odom)
+            if self._obstacles_updated:
+                self._obstacles_updated = False
+                self.get_logger().info("Obstacles updated")
+                self._map.reset_map()
+                self._map.add_obstacles(self._obstacles)
+
+
+            pose = odom_to_pose_2d(self._odom) # type: ignore
             self._car.update_states(pose.x, pose.y, pose.theta)
             # print(f"car x: {self._car.temporal_state.x}, y: {self._car.temporal_state.y}, psi: {self._car.temporal_state.psi}")
             # print(f"mpc x: {self._mpc.model.temporal_state.x}, y: {self._mpc.model.temporal_state.y}, psi: {self._mpc.model.temporal_state.psi}")
@@ -276,7 +304,7 @@ class MPCController(Node):
                 control_rate.sleep()
 
             self._car.drive(u)
-            self._command_pub.publish(array_to_ackermann_control_command(now.to_msg(), u, self._cfg.mpc.a_max))
+            self._command_pub.publish(array_to_ackermann_control_command(now.to_msg(), u, self._cfg.mpc.a_max)) # type: ignore
 
             # Log states
             sim_logger.log(self._car, u, t)

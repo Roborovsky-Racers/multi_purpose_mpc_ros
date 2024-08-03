@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from typing import List, Optional
+import copy
 
 # ROS 2
 import rclpy
@@ -30,7 +31,7 @@ class MPCSimulation:
         map: Map = self._controller._map
         car: BicycleModel = mpc.model
 
-        obstacles: Optional[List[Obstacle]] = self._controller._obstacles
+        obstacles: Optional[List[Obstacle]] = copy.deepcopy(self._controller._obstacles)
         if obstacles is None:
             obstacles = []
         obstacle_manager = ObstacleManager(map, obstacles)
