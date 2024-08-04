@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
+import sys
 from typing import List, Optional
+import matplotlib.pyplot as plt
 
 # ROS 2
 import rclpy
@@ -29,6 +31,13 @@ class MPCSimulation:
         mpc: MPC = self._controller._mpc
         map: Map = self._controller._map
         car: BicycleModel = mpc.model
+
+        def plot_reference_path(car):
+            fig, ax = plt.subplots(1, 1)
+            car.reference_path.show(ax)
+            plt.show()
+            sys.exit(1)
+        # plot_reference_path(car)
 
         obstacles: Optional[List[Obstacle]] = self._controller._obstacles
         if obstacles is None:
