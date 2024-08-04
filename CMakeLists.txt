@@ -14,6 +14,7 @@ install(PROGRAMS
   scripts/run_mpc_simulation.bash
   scripts/mpc_controller
   scripts/mpc_simulation
+  scripts/publish_initialpose
   DESTINATION lib/${PROJECT_NAME}
 )
 
