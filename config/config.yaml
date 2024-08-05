@@ -16,8 +16,8 @@ reference_path:
   # path from pkg share dir
   csv_path: ""
   resolution: 1.0
-  smoothing_distance: 10
-  max_width: 4.5
+  smoothing_distance: 12
+  max_width: 7.5
   circular: true
 
 bicycle_model:
@@ -26,7 +26,7 @@ bicycle_model:
   Ts: 0.02    # 1 / mpc.control_rate
 
 mpc:
-  N: 20
+  N: 30
   Q: [3.0, 1.5, 5.0]
   R: [0.0, 10.0]
   QN: [3.0, 1.5, 5.0]
@@ -34,7 +34,7 @@ mpc:
   a_min: -3.2 # m/s^2
   a_max: 3.2 # m/s^2
   ay_max: 20.0 # m/s^2, maximum lateral acceleration in curves
-  delta_max_deg: 60.0 # degrees
+  delta_max_deg: 80.0 # degrees
   control_rate: 50.0 # Hz
 
 

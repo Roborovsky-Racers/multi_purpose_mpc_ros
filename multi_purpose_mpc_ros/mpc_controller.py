@@ -275,7 +275,7 @@ class MPCController(Node):
 
         loop = 0
         lap_times = []
-        next_lap_start = True
+        next_lap_start = False
         MAX_LAPS=6
 
         t_start = self.get_clock().now()
@@ -321,7 +321,7 @@ class MPCController(Node):
                 self._car.update_reference_path(self._car.reference_path)
 
             # Check if a lap has been completed
-            if next_lap_start and self._car.s >= self._car.reference_path.length:
+            if (next_lap_start and self._car.s >= self._car.reference_path.length or next_lap_start and self._car.s < self._car.reference_path.length / 20.0):
                 if len(lap_times) > 0:
                     lap_time = t - sum(lap_times)
                 else:
@@ -334,8 +334,9 @@ class MPCController(Node):
             # LAPインクリメント直後にゴール付近WPを最近傍WPとして認識してしまうと、 s>=lengthとなり
             # 次の周回がすぐに終了したと判定されてしまう場合があるため、
             # 誤判定防止のために少しだけ余計に走行した後に次の周回が開始したと判定する
-            if not next_lap_start and self._car.s < self._car.reference_path.length / 10.0:
+            if not next_lap_start and (self._car.reference_path.length / 10.0 < self._car.s and self._car.s < self._car.reference_path.length / 10.0 * 2.0):
                 next_lap_start = True
+                self.get_logger().info(f'Next lap start!')
 
             control_rate.sleep()
 

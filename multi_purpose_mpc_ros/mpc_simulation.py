@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 
+import sys
 from typing import List, Optional
+<<<<<<< HEAD
 import copy
+=======
+import matplotlib.pyplot as plt
+>>>>>>> main
 
 # ROS 2
 import rclpy
@@ -31,6 +36,13 @@ class MPCSimulation:
         map: Map = self._controller._map
         car: BicycleModel = mpc.model
 
+        def plot_reference_path(car):
+            fig, ax = plt.subplots(1, 1)
+            car.reference_path.show(ax)
+            plt.show()
+            sys.exit(1)
+        # plot_reference_path(car)
+
         obstacles: Optional[List[Obstacle]] = copy.deepcopy(self._controller._obstacles)
         if obstacles is None:
             obstacles = []
@@ -44,7 +56,7 @@ class MPCSimulation:
         t = 0.0
         loop = 0
         lap_times = []
-        next_lap_start = True
+        next_lap_start = False
 
         while rclpy.ok() and (not sim_logger.stop_requested()) and len(lap_times) < MAX_LAPS:
             if PRINT_INTERVAL != 0 and loop % PRINT_INTERVAL == 0:
@@ -78,7 +90,7 @@ class MPCSimulation:
                 car.update_reference_path(car.reference_path)
 
             # Check if a lap has been completed
-            if next_lap_start and car.s >= car.reference_path.length:
+            if (next_lap_start and car.s >= car.reference_path.length or next_lap_start and car.s < car.reference_path.length / 20.0):
                 if len(lap_times) > 0:
                     lap_time = t - sum(lap_times)
                 else:
@@ -91,8 +103,9 @@ class MPCSimulation:
             # LAPインクリメント直後にゴール付近WPを最近傍WPとして認識してしまうと、 s>=lengthとなり
             # 次の周回がすぐに終了したと判定されてしまう場合があるため、
             # 誤判定防止のために少しだけ余計に走行した後に次の周回が開始したと判定する
-            if not next_lap_start and car.s < car.reference_path.length / 10.0:
+            if not next_lap_start and (car.reference_path.length / 10.0 < car.s and car.s < car.reference_path.length / 10.0 * 2.0):
                 next_lap_start = True
+                logger.info(f'Next lap start!')
 
         # show results
         sim_logger.show_results(lap_times, car)
