@@ -311,7 +311,8 @@ class MPCController(Node):
             # Log states
             sim_logger.log(self._car, u, t)
 
-            sim_logger.plot_animation(t, 0, lap_times, u, self._mpc, self._car)
+            if self._cfg.sim_logger.animation_enabled: # type: ignore
+                sim_logger.plot_animation(t, 0, lap_times, u, self._mpc, self._car)
 
             # Push next obstacle
             if loop % 50 == 0:
