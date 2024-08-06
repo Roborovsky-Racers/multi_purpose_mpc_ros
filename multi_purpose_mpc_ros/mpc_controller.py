@@ -137,7 +137,7 @@ class MPCController(Node):
                 cfg_ref_path.max_width,
                 cfg_ref_path.circular)
 
-        def create_obstacles() -> Optional[List[Obstacle]]:
+        def create_obstacles() -> List[Obstacle]:
             use_csv_obstacles = self._cfg.obstacles.csv_path != "" # type: ignore
             if use_csv_obstacles:
                 obstacles_file_path = self.in_pkg_share(self._cfg.obstacles.csv_path) # type: ignore
@@ -147,7 +147,7 @@ class MPCController(Node):
                     obstacles.append(Obstacle(cx=cx, cy=cy, radius=self._cfg.obstacles.radius)) # type: ignore
                 return obstacles
             else:
-                return None
+                return []
 
         def create_car(ref_path: ReferencePath) -> BicycleModel:
             cfg_model = self._cfg.bicycle_model # type: ignore
@@ -202,7 +202,7 @@ class MPCController(Node):
         compute_speed_profile(self._car, self._mpc_cfg)
 
         # Obstacles
-        self._use_obstacles_topic = self._obstacles is None
+        self._use_obstacles_topic = self._obstacles == []
         self._obstacles_updated = False
         self._last_obstacles_msgs_raw = None
 
@@ -226,13 +226,15 @@ class MPCController(Node):
         if not self._use_obstacles_topic:
             return
 
-        self._obstacles_updated = self._last_obstacles_msgs_raw == msg.data
-        if self._obstacles_updated:
+        obstacles_updated = (self._last_obstacles_msgs_raw != msg.data) and (len(msg.data) > 0)
+        if obstacles_updated:
             self._last_obstacles_msgs_raw = msg.data
             for i in range(0, len(msg.data), 4):
                 x = msg.data[i]
                 y = msg.data[i + 1]
                 self._obstacles.append(Obstacle(cx=x, cy=y, radius=self._cfg.obstacles.radius)) # type: ignore
+            # NOTE: This flag should be set to True only after the obstacles are updated
+            self._obstacles_updated = True
 
     def _control_mode_request_callback(self, msg):
         if msg.data:

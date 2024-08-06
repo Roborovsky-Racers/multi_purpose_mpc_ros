@@ -2,11 +2,8 @@
 
 import sys
 from typing import List, Optional
-<<<<<<< HEAD
 import copy
-=======
 import matplotlib.pyplot as plt
->>>>>>> main
 
 # ROS 2
 import rclpy
@@ -43,9 +40,7 @@ class MPCSimulation:
             sys.exit(1)
         # plot_reference_path(car)
 
-        obstacles: Optional[List[Obstacle]] = copy.deepcopy(self._controller._obstacles)
-        if obstacles is None:
-            obstacles = []
+        obstacles: List[Obstacle] = copy.deepcopy(self._controller._obstacles)
         obstacle_manager = ObstacleManager(map, obstacles)
 
         logger = self._controller.get_logger()
