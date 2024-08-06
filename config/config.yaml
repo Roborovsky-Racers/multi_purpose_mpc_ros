@@ -23,7 +23,6 @@ reference_path:
 bicycle_model:
   length: 1.087
   width: 1.45
-  Ts: 0.02    # 1 / mpc.control_rate
 
 mpc:
   N: 30
@@ -35,6 +34,6 @@ mpc:
   a_max: 3.2 # m/s^2
   ay_max: 20.0 # m/s^2, maximum lateral acceleration in curves
   delta_max_deg: 80.0 # degrees
-  control_rate: 50.0 # Hz
+  control_rate: 15.0 # Hz
 
 

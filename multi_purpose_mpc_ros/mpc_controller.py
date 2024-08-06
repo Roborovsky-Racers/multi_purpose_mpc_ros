@@ -155,7 +155,7 @@ class MPCController(Node):
                 ref_path,
                 cfg_model.length,
                 cfg_model.width,
-                cfg_model.Ts)
+                1.0 / self._cfg.mpc.control_rate) # type: ignore
 
         def create_mpc(car: BicycleModel) -> Tuple[MPCConfig, MPC]:
             cfg_mpc = self._cfg.mpc # type: ignore
