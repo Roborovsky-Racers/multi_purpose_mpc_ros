@@ -33,15 +33,16 @@ from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec
 from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
 from multi_purpose_mpc_ros.simulation_logger import SimulationLogger
 
-def array_to_ackermann_control_command(stamp, u: np.ndarray, a_max: float) -> AckermannControlCommand:
+def array_to_ackermann_control_command(stamp, u: np.ndarray, acc: float) -> AckermannControlCommand:
     msg = AckermannControlCommand()
     msg.stamp = stamp
     msg.lateral.stamp = stamp
     msg.lateral.steering_tire_angle = u[1]
     msg.lateral.steering_tire_rotation_rate = 2.0
     msg.longitudinal.stamp = stamp
-    msg.longitudinal.speed = u[0]
-    msg.longitudinal.acceleration = a_max
+    msg.longitudinal.speed = 0.0#u[0]
+    msg.longitudinal.acceleration = acc
+    # msg.longitudinal.acceleration = -acc  # hack!!!!
     return msg
 
 def yaw_from_quaternion(q: Quaternion):
@@ -238,6 +239,12 @@ class MPCController(Node):
             rate.sleep()
 
     def run(self) -> None:
+        SHOW_SIM_ANIMATION = True
+        SHOW_PLOT_ANIMATION = True
+        PLOT_RESULTS = True
+        ANIMATION_INTERVAL = 20
+        MAX_LAPS = 6
+
         self._wait_until_odom_received()
         self._wait_until_control_mode_request_received()
         control_rate = self.create_rate(self._mpc_cfg.control_rate)
@@ -248,22 +255,30 @@ class MPCController(Node):
 
         sim_logger = SimulationLogger(
             self.get_logger(),
-            self._car.temporal_state.x, self._car.temporal_state.y, True, False, True, 50)
+            self._car.temporal_state.x, self._car.temporal_state.y, SHOW_SIM_ANIMATION, SHOW_PLOT_ANIMATION, PLOT_RESULTS, ANIMATION_INTERVAL)
 
         self.get_logger().info(f"START!")
 
         loop = 0
         lap_times = []
         next_lap_start = False
-        MAX_LAPS=6
+
+        kp = 100.0
+        last_u = np.array([0.0, 0.0])
 
         t_start = self.get_clock().now()
+        last_t = t_start
         while rclpy.ok() and (not sim_logger.stop_requested()) and len(lap_times) < MAX_LAPS:
             loop += 1
+
             now = self.get_clock().now()
             t = (now - t_start).nanoseconds / 1e9
+            dt = (now - last_t).nanoseconds / 1e9
+            last_t = now
 
             pose = odom_to_pose_2d(self._odom)
+            v = self._odom.twist.twist.linear.x
+
             self._car.update_states(pose.x, pose.y, pose.theta)
             # print(f"car x: {self._car.temporal_state.x}, y: {self._car.temporal_state.y}, psi: {self._car.temporal_state.psi}")
             # print(f"mpc x: {self._mpc.model.temporal_state.x}, y: {self._mpc.model.temporal_state.y}, psi: {self._mpc.model.temporal_state.psi}")
@@ -274,14 +289,23 @@ class MPCController(Node):
             if len(u) == 0:
                 self.get_logger().error("No control signal")
                 control_rate.sleep()
+                continue
+
+            acc =  kp * (u[0] - v)
+            # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
+            acc = np.clip(acc, self._mpc_cfg.a_min, self._mpc_cfg.a_max)
+            # print(acc)
+            u[0] = np.clip(last_u[0] + acc * dt, 0.0, self._mpc_cfg.v_max)
+            last_u[0] = u[0]
+            last_u[1] = u[1]
 
             self._car.drive(u)
-            self._command_pub.publish(array_to_ackermann_control_command(now.to_msg(), u, self._cfg.mpc.a_max))
+            self._command_pub.publish(array_to_ackermann_control_command(now.to_msg(), u, acc))
 
             # Log states
             sim_logger.log(self._car, u, t)
 
-            sim_logger.plot_animation(t, 0, lap_times, u, self._mpc, self._car)
+            sim_logger.plot_animation(t, loop, lap_times, u, self._mpc, self._car)
 
             # Push next obstacle
             if loop % 50 == 0:

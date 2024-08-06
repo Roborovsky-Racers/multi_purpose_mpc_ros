@@ -59,8 +59,6 @@ class MPCSimulation:
                 logger.info(f"t = {t}, s = {car.s}, x = {car.temporal_state.x}, y = {car.temporal_state.y}")
             loop += 1
 
-            u = mpc.get_control()
-
             # Get control signals
             u = mpc.get_control()
 
