@@ -22,10 +22,10 @@ from autoware_auto_control_msgs.msg import AckermannControlCommand
 
 # Multi_Purpose_MPC
 from multi_purpose_mpc_ros.core.map import Map, Obstacle
-from multi_purpose_mpc_ros.core.reference_path import ReferencePath
+from multi_purpose_mpc_ros.core.reference_path import ReferencePath, StaticReferencePath
 from multi_purpose_mpc_ros.core.spatial_bicycle_models import BicycleModel
 from multi_purpose_mpc_ros.core.MPC import MPC
-from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec
+from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec, load_ref_path
 
 # Project
 from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
@@ -125,17 +125,31 @@ class MPCController(Node):
             return Map(self.in_pkg_share(self._cfg.map.yaml_path)) # type: ignore
 
         def create_ref_path(map: Map) -> ReferencePath:
-            wp_x, wp_y = load_waypoints(self.in_pkg_share(self._cfg.waypoints.csv_path)) # type: ignore
-
             cfg_ref_path = self._cfg.reference_path # type: ignore
-            return ReferencePath(
-                map,
-                wp_x,
-                wp_y,
-                cfg_ref_path.resolution,
-                cfg_ref_path.smoothing_distance,
-                cfg_ref_path.max_width,
-                cfg_ref_path.circular)
+
+            is_ref_path_given = cfg_ref_path.csv_path != "" # type: ignore
+            if is_ref_path_given:
+                print("Using given reference path")
+                return StaticReferencePath(
+                    map,
+                    *load_ref_path(self.in_pkg_share(self._cfg.reference_path.csv_path)), # type: ignore
+                    cfg_ref_path.max_width,
+                    cfg_ref_path.resolution,
+                )
+
+            else:
+                print("Using waypoints to create reference path")
+                wp_x, wp_y = load_waypoints(self.in_pkg_share(self._cfg.waypoints.csv_path)) # type: ignore
+
+                return ReferencePath(
+                    map,
+                    wp_x,
+                    wp_y,
+                    cfg_ref_path.resolution,
+                    cfg_ref_path.smoothing_distance,
+                    cfg_ref_path.max_width,
+                    cfg_ref_path.circular)
+
 
         def create_obstacles() -> List[Obstacle]:
             use_csv_obstacles = self._cfg.obstacles.csv_path != "" # type: ignore

@@ -17,3 +17,11 @@ def load_waypoints(csv_file_path: str) -> Tuple[List[float], List[float]]:
     wp_x = df['wp_x'].tolist()
     wp_y = df['wp_y'].tolist()
     return wp_x, wp_y
+
+def load_ref_path(csv_file_path: str):
+    df = pd.read_csv(csv_file_path)
+    x = df['x_m'].tolist()
+    y = df['y_m'].tolist()
+    psi = df['psi_rad'].tolist()
+    kappa = df['kappa_radpm'].tolist()
+    return x, y, psi, kappa

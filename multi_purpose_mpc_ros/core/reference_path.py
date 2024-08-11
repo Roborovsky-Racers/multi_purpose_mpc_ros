@@ -662,7 +662,8 @@ class StaticReferencePath(ReferencePath):
             wp_y: List[float],
             wp_psi: List[float],
             wp_kappa: List[float],
-            max_width: float):
+            max_width: float,
+            resolution: float):
         self.org_wp_x = wp_x
         self.org_wp_y = wp_y
 
@@ -671,6 +672,9 @@ class StaticReferencePath(ReferencePath):
 
         # Map
         self.map = map
+
+        self.resolution = resolution
+        self.circular = False
 
         self.waypoints = self._to_waypoint_obj(wp_x, wp_y, wp_psi, wp_kappa)
 
