@@ -9,6 +9,11 @@ waypoints:
   # path from pkg share dir
   csv_path: "maps/occupancy_grid_map_waypoints.csv"
 
+reference_path:
+  # path from pkg share dir
+  csv_path: ""
+  csv_path: "maps/optimized_traj.csv"
+
 obstacles:
   # path from pkg share dir
   csv_path: "" # If empty, the obstacles information will be subscribed from the topic
