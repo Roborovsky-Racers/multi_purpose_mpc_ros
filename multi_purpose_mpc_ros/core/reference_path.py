@@ -267,29 +267,53 @@ class ReferencePath:
                     t_x, t_y = self.map.w2m(wp.x + max_width * np.cos(angle), wp.y
                                             + max_width * np.sin(angle))
 
-                    next = False
-                    for distance in np.arange(0.1, max_width, 0.1):
-                        wp_step_x, wp_step_y = self.map.w2m(wp.x + distance * np.cos(angle),
-                                                            wp.y + distance * np.sin(angle))
+                    # Get the line from the waypoint to the target cell
+                    x_list, y_list, _ = line_aa(wp_x, wp_y, t_x, t_y)
+
+                    # if np.any(occupied_indices):
+                    #     # If there are obstacles, find the nearest one
+                    #     obstacle_index = np.argmax(occupied_indices)
+                    #     obstacle_x = x_list[obstacle_index]
+                    #     obstacle_y = y_list[obstacle_index]
+                    #     min_cell = self.map.m2w(obstacle_x, obstacle_y)
+                    #     min_width = np.hypot(wp_x - min_cell[0], wp_y - min_cell[1])
+                    #     return min_width, min_cell
+                    # else:
+                    #     # If no obstacles are found, add free space coordinates
+                    #     x_list = ma.masked_array(x_list, mask=occupied_indices).compressed()
+                    #     y_list = ma.masked_array(y_list, mask=occupied_indices).compressed()
+                    #     path_x = np.append(path_x, x_list)
+                    #     path_y = np.append(path_y, y_list)
+
+                    # found_free_cell = False
+                    # found_free_cell = False
+                    for i in range(len(x_list)):
+                        wp_xi, wp_yi = x_list[i], y_list[i]
 
                         # Check if the cell is occupied
-                        if self._is_obstacle_occupied(wp_step_x, wp_step_y):
+                        if self._is_obstacle_occupied(wp_xi, wp_yi):
                             # Obstacle detected
                             continue
 
-                        # Obstacle not detected
-                        # if next == False:
-                        #     # 障害物がない場合、障害物からの距離に少し余裕を持つために、
-                        #     # 次のイテレーションのセルを採用するためにループを進める
-                        #     next = True
-                        #     continue
+                        # Check for occupied cells (obstacles)
+                        occupied_indices = self.map.data[y_list[i:], x_list[i:]] == 0
+
+                        if np.any(occupied_indices):
+                            # If there are obstacles, find the nearest one
+                            obstacle_index = np.argmax(occupied_indices)
+                            obstacle_x = x_list[i+obstacle_index]
+                            obstacle_y = y_list[i+obstacle_index]
+                            min_cell = obstacle_x, obstacle_y
+                            min_width = np.hypot(wp_xi - min_cell[0], wp_yi - min_cell[1]) * self.map.resolution
+                        else:
+                            min_width = max_width
 
                         if dir == 'left':
-                            left_clear_cell = (wp_step_x, wp_step_y)
-                            left_min_width, _ = self._get_min_width(wp_step_x, wp_step_y, t_x, t_y, max_width)
+                            left_clear_cell = (wp_xi, wp_yi)
+                            left_min_width = min_width
                         else:
-                            right_clear_cell = (wp_step_x, wp_step_y)
-                            right_min_width, _ = self._get_min_width(wp_step_x, wp_step_y, t_x, t_y, max_width)
+                            right_clear_cell = (wp_xi, wp_yi)
+                            right_min_width = min_width
                         break
 
                 # Determine the reference cell
