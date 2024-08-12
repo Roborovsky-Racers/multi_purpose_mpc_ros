@@ -76,6 +76,7 @@ class MPCSimulation:
             # Push next obstacle
             if loop % 50 == 0:
                 obstacle_manager.push_next_obstacle_random()
+                obstacle_manager.update_map()
 
                 # circular == True のときは周回のために reference_path を定期的に更新する
                 if self._controller._cfg.reference_path.circular:

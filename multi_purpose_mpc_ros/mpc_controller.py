@@ -31,6 +31,7 @@ from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec
 # Project
 from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
 from multi_purpose_mpc_ros.simulation_logger import SimulationLogger
+from multi_purpose_mpc_ros.obstacle_manager import ObstacleManager
 
 def array_to_ackermann_control_command(stamp, u: np.ndarray, acc: float) -> AckermannControlCommand:
     msg = AckermannControlCommand()
@@ -174,6 +175,7 @@ class MPCController(Node):
                 obstacles = []
                 for cx, cy in zip(obs_x, obs_y):
                     obstacles.append(Obstacle(cx=cx, cy=cy, radius=self._cfg.obstacles.radius)) # type: ignore
+                self._obstacle_manager = ObstacleManager(map, obstacles)
                 return obstacles
             else:
                 return []
@@ -300,7 +302,7 @@ class MPCController(Node):
         ANIMATION_INTERVAL = 20
 
         self._wait_until_odom_received()
-        self._wait_until_control_mode_request_received()
+        # self._wait_until_control_mode_request_received()
         control_rate = self.create_rate(self._mpc_cfg.control_rate)
 
         pose = odom_to_pose_2d(self._odom) # type: ignore
@@ -329,8 +331,14 @@ class MPCController(Node):
             if self._trajectory is None:
                 continue
 
-            # update reference path
             if loop % 50 == 0:
+                # update obstacles
+                if not self._use_obstacles_topic:
+                    self._obstacle_manager.push_next_obstacle_random()
+                    self._obstacles = self._obstacle_manager.current_obstacles
+                    self._obstacles_updated = True
+
+                # update reference path
                 new_referece_path = self._create_reference_path_from_autoware_trajectory(self._trajectory)
                 if new_referece_path is not None:
                     self._car.reference_path = new_referece_path
@@ -354,7 +362,7 @@ class MPCController(Node):
 
             if self._obstacles_updated:
                 self._obstacles_updated = False
-                self.get_logger().info("Obstacles updated")
+                # self.get_logger().info("Obstacles updated")
                 self._map.reset_map()
                 self._map.add_obstacles(self._obstacles)
 
@@ -370,7 +378,7 @@ class MPCController(Node):
             # self.get_logger().info(f"u: {u}")
 
             if len(u) == 0:
-                self.get_logger().error("No control signal")
+                self.get_logger().error("No control signal", throttle_duration_sec=1)
                 continue
 
             acc =  kp * (u[0] - v)
@@ -397,14 +405,14 @@ class MPCController(Node):
                 lap_times.append(lap_time)
                 next_lap_start = False
 
-                self.get_logger().info(f'Lap {len(lap_times)} completed! Lap time: {lap_time} s')
+                # self.get_logger().info(f'Lap {len(lap_times)} completed! Lap time: {lap_time} s')
 
             # LAPインクリメント直後にゴール付近WPを最近傍WPとして認識してしまうと、 s>=lengthとなり
             # 次の周回がすぐに終了したと判定されてしまう場合があるため、
             # 誤判定防止のために少しだけ余計に走行した後に次の周回が開始したと判定する
             if not next_lap_start and (self._car.reference_path.length / 10.0 < self._car.s and self._car.s < self._car.reference_path.length / 10.0 * 2.0):
                 next_lap_start = True
-                self.get_logger().info(f'Next lap start!')
+                # self.get_logger().info(f'Next lap start!')
 
         # show results
         sim_logger.show_results(lap_times, self._car)
