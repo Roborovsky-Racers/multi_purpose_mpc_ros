@@ -1,5 +1,5 @@
 sim_logger:
-  animation_enabled: false
+  animation_enabled: true
 
 map:
   # path from pkg share dir
@@ -20,7 +20,12 @@ reference_path:
   csv_path: ""
   resolution: 0.4
   smoothing_distance: 10
-  max_width: 7.5
+  # resolution: 0.4
+  # smoothing_distance: 7
+  # resolution: 1.0
+  # smoothing_distance: 1
+
+  max_width: 8.0
   circular: false
 
 bicycle_model:
@@ -35,7 +40,7 @@ mpc:
   v_max: 30.0 # km/h
   a_min: -3.2 # m/s^2
   a_max: 3.2 # m/s^2
-  ay_max: 40.0 # m/s^2, maximum lateral acceleration in curves
+  ay_max: 20.0 # m/s^2, maximum lateral acceleration in curves
   delta_max_deg: 80.0 # degrees
   control_rate: 50.0 # Hz
 
