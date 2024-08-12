@@ -19,6 +19,7 @@ from geometry_msgs.msg import Quaternion, Pose2D
 
 # autoware
 from autoware_auto_control_msgs.msg import AckermannControlCommand
+from autoware_auto_planning_msgs.msg import Trajectory
 
 # Multi_Purpose_MPC
 from multi_purpose_mpc_ros.core.map import Map, Obstacle
@@ -38,7 +39,7 @@ def array_to_ackermann_control_command(stamp, u: np.ndarray, acc: float) -> Acke
     msg.lateral.steering_tire_angle = u[1]
     msg.lateral.steering_tire_rotation_rate = 2.0
     msg.longitudinal.stamp = stamp
-    msg.longitudinal.speed = 0.0#u[0]
+    msg.longitudinal.speed = 0.0  #u[0]
     msg.longitudinal.acceleration = acc
     # msg.longitudinal.acceleration = -acc  # hack!!!!
     return msg
@@ -120,6 +121,33 @@ class MPCController(Node):
         for file_path in mandatory_files:
             file_exists(self.in_pkg_share(file_path))
         return cfg
+
+    def _create_reference_path_from_autoware_trajectory(self, trajectory: Trajectory) -> ReferencePath:
+        wp_x = [0] * len(trajectory.points)
+        wp_y = [0] * len(trajectory.points)
+        for i, p in enumerate(trajectory.points):
+            wp_x[i] = p.pose.position.x
+            wp_y[i] = p.pose.position.y
+
+        cfg_ref_path = self._cfg.reference_path # type: ignore
+        reference_path = ReferencePath(
+            self._map,
+            wp_x,
+            wp_y,
+            cfg_ref_path.resolution,
+            cfg_ref_path.smoothing_distance,
+            cfg_ref_path.max_width,
+            cfg_ref_path.circular)
+
+        mpc_config = self._mpc_cfg
+        speed_profile_constraints = {
+            "a_min": mpc_config.a_min, "a_max": mpc_config.a_max,
+            "v_min": 0.0, "v_max": mpc_config.v_max, "ay_max": mpc_config.ay_max}
+
+        if not reference_path.compute_speed_profile(speed_profile_constraints):
+            return None
+
+        return reference_path
 
     def _initialize(self) -> None:
         def create_map() -> Map:
@@ -219,6 +247,8 @@ class MPCController(Node):
             Float64MultiArray, "/aichallenge/objects", self._obstacles_callback, 1)
         self._control_mode_request_sub = self.create_subscription(
             Bool, "control/control_mode_request_topic", self._control_mode_request_callback, 1)
+        self._trajectory_sub = self.create_subscription(
+            Trajectory, "planning/scenario_planning/trajectory", self._trajectory_callback, 1)
 
     def _odom_callback(self, msg: Odometry) -> None:
         self._odom = msg
@@ -242,6 +272,9 @@ class MPCController(Node):
             self.get_logger().info("Control mode request received")
             self._enable_control = True
 
+    def _trajectory_callback(self, msg):
+        self._trajectory = msg
+
     def _wait_until_odom_received(self, timeout: float = 30.) -> None:
         t_start = self.get_clock().now()
         self.get_logger().info(f"t_start: {t_start}")
@@ -262,11 +295,9 @@ class MPCController(Node):
             rate.sleep()
 
     def run(self) -> None:
-        SHOW_SIM_ANIMATION = True
-        SHOW_PLOT_ANIMATION = True
-        PLOT_RESULTS = True
+        SHOW_PLOT_ANIMATION = False
+        PLOT_RESULTS = False
         ANIMATION_INTERVAL = 20
-        MAX_LAPS = 6
 
         self._wait_until_odom_received()
         self._wait_until_control_mode_request_received()
@@ -274,11 +305,12 @@ class MPCController(Node):
 
         pose = odom_to_pose_2d(self._odom) # type: ignore
         self._car.update_states(pose.x, pose.y, pose.theta)
+
         self._car.update_reference_path(self._car.reference_path)
 
         sim_logger = SimulationLogger(
             self.get_logger(),
-            self._car.temporal_state.x, self._car.temporal_state.y, SHOW_SIM_ANIMATION, SHOW_PLOT_ANIMATION, PLOT_RESULTS, ANIMATION_INTERVAL)
+            self._car.temporal_state.x, self._car.temporal_state.y, self._cfg.sim_logger.animation_enabled, SHOW_PLOT_ANIMATION, PLOT_RESULTS, ANIMATION_INTERVAL)
 
         self.get_logger().info(f"START!")
 
@@ -291,14 +323,34 @@ class MPCController(Node):
 
         t_start = self.get_clock().now()
         last_t = t_start
-        while rclpy.ok() and (not sim_logger.stop_requested()) and len(lap_times) < MAX_LAPS:
+        while rclpy.ok() and (not sim_logger.stop_requested()):# and len(lap_times) < MAX_LAPS:
+            control_rate.sleep()
+
+            if self._trajectory is None:
+                continue
+
+            # update reference path
+            if loop % 50 == 0:
+                new_referece_path = self._create_reference_path_from_autoware_trajectory(self._trajectory)
+                if new_referece_path is not None:
+                    self._car.reference_path = new_referece_path
+                    self._car.update_reference_path(self._car.reference_path)
+
+                def plot_reference_path(car):
+                    import matplotlib.pyplot as plt
+                    import sys
+                    fig, ax = plt.subplots(1, 1)
+                    car.reference_path.show(ax)
+                    plt.show()
+                    sys.exit(1)
+                # plot_reference_path(self._car)
+
             loop += 1
 
             now = self.get_clock().now()
             t = (now - t_start).nanoseconds / 1e9
             dt = (now - last_t).nanoseconds / 1e9
             last_t = now
-
 
             if self._obstacles_updated:
                 self._obstacles_updated = False
@@ -319,7 +371,6 @@ class MPCController(Node):
 
             if len(u) == 0:
                 self.get_logger().error("No control signal")
-                control_rate.sleep()
                 continue
 
             acc =  kp * (u[0] - v)
@@ -335,18 +386,7 @@ class MPCController(Node):
 
             # Log states
             sim_logger.log(self._car, u, t)
-
-            if self._cfg.sim_logger.animation_enabled: # type: ignore
-                sim_logger.plot_animation(t, loop, lap_times, u, self._mpc, self._car)
-
-            # Push next obstacle
-            if loop % 50 == 0:
-                # obstacle_manager.push_next_obstacle_random()
-
-                # update reference path
-                # 現在は、同じコースを何周もするだけ
-                # (コースの途中で reference_path を更新してもOK)
-                self._car.update_reference_path(self._car.reference_path)
+            sim_logger.plot_animation(t, loop, lap_times, u, self._mpc, self._car)
 
             # Check if a lap has been completed
             if (next_lap_start and self._car.s >= self._car.reference_path.length or next_lap_start and self._car.s < self._car.reference_path.length / 20.0):
@@ -365,8 +405,6 @@ class MPCController(Node):
             if not next_lap_start and (self._car.reference_path.length / 10.0 < self._car.s and self._car.s < self._car.reference_path.length / 10.0 * 2.0):
                 next_lap_start = True
                 self.get_logger().info(f'Next lap start!')
-
-            control_rate.sleep()
 
         # show results
         sim_logger.show_results(lap_times, self._car)

@@ -26,7 +26,7 @@ class MPCSimulation:
         SHOW_PLOT_ANIMATION = True
         PLOT_RESULTS = True
         ANIMATION_INTERVAL = 20
-        PRINT_INTERVAL = 10
+        PRINT_INTERVAL = 0
         MAX_LAPS = 6
 
         mpc: MPC = self._controller._mpc
@@ -77,10 +77,9 @@ class MPCSimulation:
             if loop % 50 == 0:
                 obstacle_manager.push_next_obstacle_random()
 
-                # update reference path
-                # 現在は、同じコースを何周もするだけ
-                # (コースの途中で reference_path を更新してもOK)
-                car.update_reference_path(car.reference_path)
+                # circular == True のときは周回のために reference_path を定期的に更新する
+                if self._controller._cfg.reference_path.circular:
+                    car.update_reference_path(car.reference_path)
 
             # Check if a lap has been completed
             if (next_lap_start and car.s >= car.reference_path.length or next_lap_start and car.s < car.reference_path.length / 20.0):

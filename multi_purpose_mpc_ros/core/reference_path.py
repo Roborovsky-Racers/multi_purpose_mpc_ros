@@ -306,6 +306,9 @@ class ReferencePath:
 
         # Set optimization horizon
         N = self.n_waypoints - 1
+        if N < 2:
+            print("Path too short for speed profile computation!")
+            return False
 
         # Constraints
         a_min = np.ones(N-1) * Constraints['a_min']
@@ -361,7 +364,13 @@ class ReferencePath:
         # Assign reference velocity to every waypoint
         for i, wp in enumerate(self.waypoints[:-1]):
             wp.v_ref = speed_profile[i]
-        self.waypoints[-1].v_ref = self.waypoints[-2].v_ref
+
+        if self.circular:
+            self.waypoints[-1].v_ref = self.waypoints[-2].v_ref
+        else:
+            self.waypoints[-1].v_ref = 0.0
+
+        return True
 
     def get_waypoint(self, wp_id):
         """
@@ -375,8 +384,9 @@ class ReferencePath:
             wp_id = np.mod(wp_id, self.n_waypoints)
         # Terminate execution if end of path reached
         elif wp_id >= self.n_waypoints and not self.circular:
-            print('Reached end of path!')
-            exit(1)
+            # print('Reached end of path!')
+            wp_id = self.n_waypoints - 1
+            # exit(1)
 
         return self.waypoints[wp_id]
 
@@ -461,8 +471,8 @@ class ReferencePath:
                            [self.waypoints[0].static_border_cells[1][0]])
         wp_lb_y = np.array([wp.dynamic_border_cells[1][1] for wp in self.waypoints] +
                            [self.waypoints[0].static_border_cells[1][1]])
-        ax.plot(wp_ub_x, wp_ub_y, c=PATH_CONSTRAINTS)
-        ax.plot(wp_lb_x, wp_lb_y, c=PATH_CONSTRAINTS)
+        ax.plot(wp_ub_x[0:-1], wp_ub_y[0:-1], c=PATH_CONSTRAINTS)
+        ax.plot(wp_lb_x[0:-1], wp_lb_y[0:-1], c=PATH_CONSTRAINTS)
 
         # Plot obstacles
         for obstacle in self.map.obstacles:
