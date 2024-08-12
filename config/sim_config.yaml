@@ -18,10 +18,10 @@ obstacles:
 reference_path:
   # path from pkg share dir
   csv_path: ""
-  resolution: 0.4
-  smoothing_distance: 10
+  resolution: 1.0
+  smoothing_distance: 12
   max_width: 7.5
-  circular: false
+  circular: true
 
 bicycle_model:
   length: 1.087

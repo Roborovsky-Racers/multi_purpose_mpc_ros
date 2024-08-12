@@ -14,7 +14,7 @@ def launch_setup(context, *args, **kwargs):
     config_path = (
         Path(get_package_share_directory("multi_purpose_mpc_ros"))
         / "config"
-        / "config.yaml"
+        / "sim_config.yaml"
     )
 
     mpc_simulation = Node(
