@@ -112,9 +112,11 @@ class MPC:
             if vmax_dyn < umax_dyn[self.nu*n]:
                 umax_dyn[self.nu*n] = vmax_dyn
 
+        min_width = 2*self.model.safety_margin
+
         # Compute dynamic constraints on e_y
         ub, lb, _ = self.model.reference_path.update_path_constraints(
-                    self.model.wp_id+1, N, 2*self.model.safety_margin,
+                    self.model.wp_id+1, N, min_width,
             self.model.safety_margin)
         xmin_dyn[0] = self.model.spatial_state.e_y
         xmax_dyn[0] = self.model.spatial_state.e_y
@@ -212,19 +214,18 @@ class MPC:
             # if problem solved, reset infeasibility counter
             self.infeasibility_counter = 0
 
-        except:
-
-            print('Infeasible problem. Previously predicted'
-                  ' control signal used!')
+        except Exception as e:
+            # print('Infeasible problem. Previously predicted'
+            #       ' control signal used!')
             id = nu * (self.infeasibility_counter + 1)
             u = np.array(self.current_control[id:id+2])
 
             # increase infeasibility counter
             self.infeasibility_counter += 1
 
-        if self.infeasibility_counter == (N - 1):
-            print('No control signal computed!')
-            exit(1)
+        # if self.infeasibility_counter == (N - 1):
+        #     print('No control signal computed!')
+        #     exit(1)
 
         return u
 
