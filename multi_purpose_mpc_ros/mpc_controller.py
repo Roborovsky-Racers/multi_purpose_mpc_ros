@@ -262,6 +262,7 @@ class MPCController(Node):
         obstacles_updated = (self._last_obstacles_msgs_raw != msg.data) and (len(msg.data) > 0)
         if obstacles_updated:
             self._last_obstacles_msgs_raw = msg.data
+            self._obstacles = []
             for i in range(0, len(msg.data), 4):
                 x = msg.data[i]
                 y = msg.data[i + 1]
