@@ -246,9 +246,9 @@ class ReferencePath:
             # Get pixel coordinates of waypoint
             wp_x, wp_y = self.map.w2m(wp.x, wp.y)
 
-            center_x, center_y = self.map.m2w(wp_x, wp_y)
-            self._center_x.append(center_x)
-            self._center_y.append(center_y)
+            # center_x, center_y = self.map.m2w(wp_x, wp_y)
+            # self._center_x.append(center_x)
+            # self._center_y.append(center_y)
 
             # WP位置上に障害物がある場合、_get_min_width が適切な結果を返さない。
             # その場合は、WP位置から左右にセルを捜査し、障害物がないセルのうち、より中心に近いセルを基準WPとして選択する
@@ -270,23 +270,6 @@ class ReferencePath:
                     # Get the line from the waypoint to the target cell
                     x_list, y_list, _ = line_aa(wp_x, wp_y, t_x, t_y)
 
-                    # if np.any(occupied_indices):
-                    #     # If there are obstacles, find the nearest one
-                    #     obstacle_index = np.argmax(occupied_indices)
-                    #     obstacle_x = x_list[obstacle_index]
-                    #     obstacle_y = y_list[obstacle_index]
-                    #     min_cell = self.map.m2w(obstacle_x, obstacle_y)
-                    #     min_width = np.hypot(wp_x - min_cell[0], wp_y - min_cell[1])
-                    #     return min_width, min_cell
-                    # else:
-                    #     # If no obstacles are found, add free space coordinates
-                    #     x_list = ma.masked_array(x_list, mask=occupied_indices).compressed()
-                    #     y_list = ma.masked_array(y_list, mask=occupied_indices).compressed()
-                    #     path_x = np.append(path_x, x_list)
-                    #     path_y = np.append(path_y, y_list)
-
-                    # found_free_cell = False
-                    # found_free_cell = False
                     for i in range(len(x_list)):
                         wp_xi, wp_yi = x_list[i], y_list[i]
 
@@ -319,10 +302,10 @@ class ReferencePath:
                 # Determine the reference cell
                 choose_left = False
                 if left_clear_cell and right_clear_cell:
-                    isequal = abs(left_min_width - right_min_width) < 0.01
+                    isequal = abs(left_min_width - right_min_width) < 0.5
                     if not isequal:
                         # If one side is closer to the wall, choose the side with more free space
-                        print(f"left_min_width: {left_min_width}, right_min_width: {right_min_width}")
+                        # print(f"left_min_width: {left_min_width}, right_min_width: {right_min_width}")
                         if left_min_width > right_min_width:
                             choose_left = True
                     elif wp_id > 0:
@@ -331,17 +314,17 @@ class ReferencePath:
                         prev_wp_x, prev_wp_y = self.map.w2m(prev_wp.x, prev_wp.y)
                         left_dist_from_prev = dist(left_clear_cell[0], left_clear_cell[1], prev_wp_x, prev_wp_y)
                         right_dist_from_prev = dist(right_clear_cell[0], right_clear_cell[1], prev_wp_x, prev_wp_y)
-                        print(f"left_dist_from_prev: {left_dist_from_prev}, right_dist_from_prev: {right_dist_from_prev}")
+                        # print(f"left_dist_from_prev: {left_dist_from_prev}, right_dist_from_prev: {right_dist_from_prev}")
                         if left_dist_from_prev < right_dist_from_prev:
                             choose_left = True
                     else:
-                        print("No previous waypoint to compare distances")
+                        # print("No previous waypoint to compare distances")
                         choose_left = True
                 elif left_clear_cell:
-                    print("Only left clear cell found")
+                    # print("Only left clear cell found")
                     choose_left = True
                 elif right_clear_cell:
-                    print("Only right clear cell found")
+                    # print("Only right clear cell found")
                     pass
                 else:
                     print("No free cell found in either direction")
@@ -351,12 +334,12 @@ class ReferencePath:
                 else:
                     wp_x, wp_y = right_clear_cell[0], right_clear_cell[1]
 
-                print(f"wp[{wp_id}] Choose left: {choose_left}, wp_x: {wp_x}, wp_y: {wp_y}")
+                # print(f"wp[{wp_id}] Choose left: {choose_left}, wp_x: {wp_x}, wp_y: {wp_y}")
 
-                if left_clear_cell is not None or right_clear_cell is not None:
-                    center_x, center_y = self.map.m2w(wp_x, wp_y)
-                    self._obst_center_x.append(center_x)
-                    self._obst_center_y.append(center_y)
+                # if left_clear_cell is not None or right_clear_cell is not None:
+                #     center_x, center_y = self.map.m2w(wp_x, wp_y)
+                #     self._obst_center_x.append(center_x)
+                #     self._obst_center_y.append(center_y)
 
             # List containing information for current waypoint
             width_info = []
@@ -568,7 +551,7 @@ class ReferencePath:
 
         # Plot waypoints
         colors = [wp.v_ref for wp in self.waypoints]
-        # ax.scatter(wp_x, wp_y, c=WAYPOINTS, s=10)
+        ax.scatter(wp_x, wp_y, c=WAYPOINTS, s=10)
 
         # Plot arrows indicating drivable area
         if display_drivable_area:

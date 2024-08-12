@@ -324,6 +324,9 @@ class MPCController(Node):
         kp = 100.0
         last_u = np.array([0.0, 0.0])
 
+        # for i in range(10):
+        #     self._obstacle_manager.push_next_obstacle()
+
         t_start = self.get_clock().now()
         last_t = t_start
         while rclpy.ok() and (not sim_logger.stop_requested()):# and len(lap_times) < MAX_LAPS:
@@ -332,10 +335,10 @@ class MPCController(Node):
             if self._trajectory is None:
                 continue
 
-            if loop % 50 == 0:
+            if loop % 100 == 0:
                 # update obstacles
                 if not self._use_obstacles_topic:
-                    self._obstacle_manager.push_next_obstacle_random()
+                    # self._obstacle_manager.push_next_obstacle()
                     self._obstacles = self._obstacle_manager.current_obstacles
                     self._obstacles_updated = True
 
