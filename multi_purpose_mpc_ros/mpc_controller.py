@@ -303,7 +303,7 @@ class MPCController(Node):
         ANIMATION_INTERVAL = 20
 
         self._wait_until_odom_received()
-        # self._wait_until_control_mode_request_received()
+        self._wait_until_control_mode_request_received()
         control_rate = self.create_rate(self._mpc_cfg.control_rate)
 
         pose = odom_to_pose_2d(self._odom) # type: ignore
