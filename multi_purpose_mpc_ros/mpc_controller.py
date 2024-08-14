@@ -6,6 +6,7 @@ import dataclasses
 from scipy import sparse
 from scipy.sparse import dia_matrix
 import numpy as np
+import time
 
 # ROS 2
 import rclpy
@@ -88,6 +89,9 @@ class MPCConfig:
 class MPCController(Node):
 
     PKG_PATH: str = get_package_share_directory('multi_purpose_mpc_ros') + "/"
+    USE_BUG_ACC = False
+    BUG_VEL = 40.0 # km/h
+    BUG_ACC = 400.0
 
     def __init__(self, config_path: str) -> None:
         super().__init__("mpc_controller") # type: ignore
@@ -218,7 +222,7 @@ class MPCController(Node):
                 sparse.diags(cfg_mpc.Q),
                 sparse.diags(cfg_mpc.R),
                 sparse.diags(cfg_mpc.QN),
-                kmh_to_m_per_sec(cfg_mpc.v_max),
+                kmh_to_m_per_sec(self.BUG_VEL if self.USE_BUG_ACC else cfg_mpc.v_max),
                 cfg_mpc.a_min,
                 cfg_mpc.a_max,
                 cfg_mpc.ay_max,
@@ -410,16 +414,26 @@ class MPCController(Node):
                 self.get_logger().error("No control signal", throttle_duration_sec=1)
                 continue
 
-            acc =  kp * (u[0] - v)
-            # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
-            acc = np.clip(acc, self._mpc_cfg.a_min, self._mpc_cfg.a_max)
-            # print(acc)
+            acc = 0.
+            if self.USE_BUG_ACC:
+                acc = self.BUG_ACC
+            else:
+                acc =  kp * (u[0] - v)
+                # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
+                acc = np.clip(acc, self._mpc_cfg.a_min, self._mpc_cfg.a_max)
             u[0] = np.clip(last_u[0] + acc * dt, 0.0, self._mpc_cfg.v_max)
             last_u[0] = u[0]
             last_u[1] = u[1]
 
+
             self._car.drive(u)
-            self._command_pub.publish(array_to_ackermann_control_command(now.to_msg(), u, acc)) #ignore
+            if self.USE_BUG_ACC:
+                for _ in range(10):
+                    tmp_now = self.get_clock().now()
+                    self._command_pub.publish(array_to_ackermann_control_command(tmp_now.to_msg(), u, acc)) #ignore
+                    time.sleep((1.0/self._mpc_cfg.control_rate)/30.)
+            else:
+                self._command_pub.publish(array_to_ackermann_control_command(now.to_msg(), u, acc)) #ignore
 
             # Log states
             sim_logger.log(self._car, u, t)
