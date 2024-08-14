@@ -19,16 +19,16 @@ obstacles:
 reference_path:
   # path from pkg share dir
   csv_path: ""
-  csv_path: "maps/optimized_traj.csv"
+  csv_path: "maps/optimized_traj_mintime.csv"
   resolution: 0.4
-  smoothing_distance: 10
-  max_width: 5.0
+  smoothing_distance: 5
+  max_width: 6.0
   # circular: false
   circular: true
 
 bicycle_model:
   length: 1.087
-  width: 1.45
+  width: 1.15
 
 mpc:
   N: 30
