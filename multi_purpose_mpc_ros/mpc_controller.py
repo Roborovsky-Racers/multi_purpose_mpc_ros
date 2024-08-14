@@ -160,12 +160,21 @@ class MPCController(Node):
             is_ref_path_given = cfg_ref_path.csv_path != "" # type: ignore
             if is_ref_path_given:
                 print("Using given reference path")
-                return StaticReferencePath(
+                # return StaticReferencePath(
+                #     map,
+                #     *load_ref_path(self.in_pkg_share(self._cfg.reference_path.csv_path)), # type: ignore
+                #     cfg_ref_path.max_width,
+                #     cfg_ref_path.resolution,
+                # )
+                wp_x, wp_y, _, _ = load_ref_path(self.in_pkg_share(self._cfg.reference_path.csv_path)) # type: ignore
+                return ReferencePath(
                     map,
-                    *load_ref_path(self.in_pkg_share(self._cfg.reference_path.csv_path)), # type: ignore
-                    cfg_ref_path.max_width,
+                    wp_x,
+                    wp_y,
                     cfg_ref_path.resolution,
-                )
+                    cfg_ref_path.smoothing_distance,
+                    cfg_ref_path.max_width,
+                    cfg_ref_path.circular)
 
             else:
                 print("Using waypoints to create reference path")
@@ -189,7 +198,7 @@ class MPCController(Node):
                 obstacles = []
                 for cx, cy in zip(obs_x, obs_y):
                     obstacles.append(Obstacle(cx=cx, cy=cy, radius=self._cfg.obstacles.radius)) # type: ignore
-                self._obstacle_manager = ObstacleManager(map, obstacles)
+                self._obstacle_manager = ObstacleManager(self._map, obstacles)
                 return obstacles
             else:
                 return []
@@ -246,6 +255,8 @@ class MPCController(Node):
         self._mpc_cfg, self._mpc = create_mpc(self._car)
         compute_speed_profile(self._car, self._mpc_cfg)
 
+        self._trajectory: Optional[Trajectory] = None
+
         # Obstacles
         self._use_obstacles_topic = self._obstacles == []
         self._obstacles_updated = False
@@ -263,8 +274,8 @@ class MPCController(Node):
             Float64MultiArray, "/aichallenge/objects", self._obstacles_callback, 1)
         self._control_mode_request_sub = self.create_subscription(
             Bool, "control/control_mode_request_topic", self._control_mode_request_callback, 1)
-        self._trajectory_sub = self.create_subscription(
-            Trajectory, "planning/scenario_planning/trajectory", self._trajectory_callback, 1)
+        # self._trajectory_sub = self.create_subscription(
+        #     Trajectory, "planning/scenario_planning/trajectory", self._trajectory_callback, 1)
 
     def _odom_callback(self, msg: Odometry) -> None:
         self._odom = msg
@@ -327,7 +338,7 @@ class MPCController(Node):
 
         sim_logger = SimulationLogger(
             self.get_logger(),
-            self._car.temporal_state.x, self._car.temporal_state.y, self._cfg.sim_logger.animation_enabled, SHOW_PLOT_ANIMATION, PLOT_RESULTS, ANIMATION_INTERVAL)
+            self._car.temporal_state.x, self._car.temporal_state.y, self._cfg.sim_logger.animation_enabled, SHOW_PLOT_ANIMATION, PLOT_RESULTS, ANIMATION_INTERVAL) # type: ignore
 
         self.get_logger().info(f"START!")
 
@@ -346,8 +357,8 @@ class MPCController(Node):
         while rclpy.ok() and (not sim_logger.stop_requested()):# and len(lap_times) < MAX_LAPS:
             control_rate.sleep()
 
-            if self._trajectory is None:
-                continue
+            # if self._trajectory is None:
+            #     continue
 
             if loop % 100 == 0:
                 # update obstacles
@@ -357,10 +368,10 @@ class MPCController(Node):
                     self._obstacles_updated = True
 
                 # update reference path
-                new_referece_path = self._create_reference_path_from_autoware_trajectory(self._trajectory)
-                if new_referece_path is not None:
-                    self._car.reference_path = new_referece_path
-                    self._car.update_reference_path(self._car.reference_path)
+                # new_referece_path = self._create_reference_path_from_autoware_trajectory(self._trajectory)
+                # if new_referece_path is not None:
+                #     self._car.reference_path = new_referece_path
+                #     self._car.update_reference_path(self._car.reference_path)
 
                 def plot_reference_path(car):
                     import matplotlib.pyplot as plt

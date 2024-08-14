@@ -7,7 +7,8 @@ map:
 
 waypoints:
   # path from pkg share dir
-  csv_path: "maps/occupancy_grid_map_waypoints.csv"
+  # csv_path: "maps/occupancy_grid_map_waypoints.csv"
+  csv_path: ""
 
 obstacles:
   # path from pkg share dir
@@ -22,7 +23,8 @@ reference_path:
   resolution: 0.4
   smoothing_distance: 10
   max_width: 5.0
-  circular: false
+  # circular: false
+  circular: true
 
 bicycle_model:
   length: 1.087
@@ -30,7 +32,7 @@ bicycle_model:
 
 mpc:
   N: 30
-  Q: [3.0, 1.5, 5.0]  # [v, delta, t]
+  Q: [3.0, 100.0, 5.0]  # [v, delta, t]
   R: [0.0, 100.0]      # [v, delta]
   QN: [3.0, 1.5, 5.0]
   v_max: 30.0 # km/h
