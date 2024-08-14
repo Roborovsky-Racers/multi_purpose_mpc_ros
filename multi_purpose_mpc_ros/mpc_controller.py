@@ -89,7 +89,7 @@ class MPCConfig:
 class MPCController(Node):
 
     PKG_PATH: str = get_package_share_directory('multi_purpose_mpc_ros') + "/"
-    USE_BUG_ACC = True
+    USE_BUG_ACC = False
     BUG_VEL = 40.0 # km/h
     BUG_ACC = 400.0
 
@@ -272,8 +272,8 @@ class MPCController(Node):
             Float64MultiArray, "/aichallenge/objects", self._obstacles_callback, 1)
         self._control_mode_request_sub = self.create_subscription(
             Bool, "control/control_mode_request_topic", self._control_mode_request_callback, 1)
-        # self._trajectory_sub = self.create_subscription(
-        #     Trajectory, "planning/scenario_planning/trajectory", self._trajectory_callback, 1)
+        self._trajectory_sub = self.create_subscription(
+            Trajectory, "planning/scenario_planning/trajectory", self._trajectory_callback, 1)
 
     def _odom_callback(self, msg: Odometry) -> None:
         self._odom = msg
@@ -355,8 +355,8 @@ class MPCController(Node):
         while rclpy.ok() and (not sim_logger.stop_requested()):# and len(lap_times) < MAX_LAPS:
             control_rate.sleep()
 
-            # if self._trajectory is None:
-            #     continue
+            if self._cfg.reference_path.update_by_topic and self._trajectory is None: # type: ignore
+                continue
 
             if loop % 100 == 0:
                 # update obstacles
@@ -366,10 +366,11 @@ class MPCController(Node):
                     self._obstacles_updated = True
 
                 # update reference path
-                # new_referece_path = self._create_reference_path_from_autoware_trajectory(self._trajectory)
-                # if new_referece_path is not None:
-                #     self._car.reference_path = new_referece_path
-                #     self._car.update_reference_path(self._car.reference_path)
+                if self._cfg.reference_path.update_by_topic: # type: ignore
+                    new_referece_path = self._create_reference_path_from_autoware_trajectory(self._trajectory)
+                    if new_referece_path is not None:
+                        self._car.reference_path = new_referece_path
+                        self._car.update_reference_path(self._car.reference_path)
 
                 def plot_reference_path(car):
                     import matplotlib.pyplot as plt

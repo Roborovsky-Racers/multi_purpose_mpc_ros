@@ -123,9 +123,10 @@ class ReferencePath:
         :return: list of waypoint objects
         """
 
-        # insert the first smoothing_distance points to the end of the list
-        wp_x = wp_x + wp_x[:self.smoothing_distance]
-        wp_y = wp_y + wp_y[:self.smoothing_distance]
+        if self.circular:
+            # insert the first smoothing_distance points to the end of the list
+            wp_x = wp_x + wp_x[:self.smoothing_distance]
+            wp_y = wp_y + wp_y[:self.smoothing_distance]
 
         # Number of waypoints
         n_wp = [max(1, int(np.sqrt((wp_x[i + 1] - wp_x[i]) ** 2 +
