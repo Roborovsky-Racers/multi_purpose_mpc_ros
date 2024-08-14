@@ -237,6 +237,7 @@ class ReferencePath:
         self._obst_center_x = []
         self._obst_center_y = []
 
+        print("--------------------")
         for wp_id, wp in enumerate(self.waypoints):
             left_angle = np.mod(wp.psi + math.pi / 2 + math.pi,
                              2 * math.pi) - math.pi
@@ -246,9 +247,9 @@ class ReferencePath:
             # Get pixel coordinates of waypoint
             wp_x, wp_y = self.map.w2m(wp.x, wp.y)
 
-            # center_x, center_y = self.map.m2w(wp_x, wp_y)
-            # self._center_x.append(center_x)
-            # self._center_y.append(center_y)
+            center_x, center_y = self.map.m2w(wp_x, wp_y)
+            self._center_x.append(center_x)
+            self._center_y.append(center_y)
 
             # WP位置上に障害物がある場合、_get_min_width が適切な結果を返さない。
             # その場合は、WP位置から左右にセルを捜査し、障害物がないセルのうち、より中心に近いセルを基準WPとして選択する
@@ -305,7 +306,9 @@ class ReferencePath:
                     isequal = abs(left_min_width - right_min_width) < 0.5
                     if not isequal:
                         # If one side is closer to the wall, choose the side with more free space
-                        # print(f"left_min_width: {left_min_width}, right_min_width: {right_min_width}")
+                        print(f"left_min_width: {left_min_width}, right_min_width: {right_min_width}")
+                        print(x_list)
+                        print(y_list)
                         if left_min_width > right_min_width:
                             choose_left = True
                     elif wp_id > 0:
@@ -314,7 +317,7 @@ class ReferencePath:
                         prev_wp_x, prev_wp_y = self.map.w2m(prev_wp.x, prev_wp.y)
                         left_dist_from_prev = dist(left_clear_cell[0], left_clear_cell[1], prev_wp_x, prev_wp_y)
                         right_dist_from_prev = dist(right_clear_cell[0], right_clear_cell[1], prev_wp_x, prev_wp_y)
-                        # print(f"left_dist_from_prev: {left_dist_from_prev}, right_dist_from_prev: {right_dist_from_prev}")
+                        print(f"left_dist_from_prev: {left_dist_from_prev}, right_dist_from_prev: {right_dist_from_prev}")
                         if left_dist_from_prev < right_dist_from_prev:
                             choose_left = True
                     else:
@@ -334,12 +337,13 @@ class ReferencePath:
                 else:
                     wp_x, wp_y = right_clear_cell[0], right_clear_cell[1]
 
-                # print(f"wp[{wp_id}] Choose left: {choose_left}, wp_x: {wp_x}, wp_y: {wp_y}")
+                wp_x_w, wp_y_w = self.map.m2w(wp_x, wp_y)
+                print(f"wp[{wp_id}] Choose left: {choose_left}, wp_x: {wp_x_w}, wp_y: {wp_y_w}")
 
-                # if left_clear_cell is not None or right_clear_cell is not None:
-                #     center_x, center_y = self.map.m2w(wp_x, wp_y)
-                #     self._obst_center_x.append(center_x)
-                #     self._obst_center_y.append(center_y)
+                if left_clear_cell is not None or right_clear_cell is not None:
+                    center_x, center_y = self.map.m2w(wp_x, wp_y)
+                    self._obst_center_x.append(center_x)
+                    self._obst_center_y.append(center_y)
 
             # List containing information for current waypoint
             width_info = []
