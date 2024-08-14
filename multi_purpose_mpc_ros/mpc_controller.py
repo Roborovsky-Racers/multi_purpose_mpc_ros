@@ -24,7 +24,7 @@ from autoware_auto_planning_msgs.msg import Trajectory
 
 # Multi_Purpose_MPC
 from multi_purpose_mpc_ros.core.map import Map, Obstacle
-from multi_purpose_mpc_ros.core.reference_path import ReferencePath, StaticReferencePath
+from multi_purpose_mpc_ros.core.reference_path import ReferencePath
 from multi_purpose_mpc_ros.core.spatial_bicycle_models import BicycleModel
 from multi_purpose_mpc_ros.core.MPC import MPC
 from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec, load_ref_path
@@ -89,7 +89,7 @@ class MPCConfig:
 class MPCController(Node):
 
     PKG_PATH: str = get_package_share_directory('multi_purpose_mpc_ros') + "/"
-    USE_BUG_ACC = False
+    USE_BUG_ACC = True
     BUG_VEL = 40.0 # km/h
     BUG_ACC = 400.0
 
@@ -164,12 +164,6 @@ class MPCController(Node):
             is_ref_path_given = cfg_ref_path.csv_path != "" # type: ignore
             if is_ref_path_given:
                 print("Using given reference path")
-                # return StaticReferencePath(
-                #     map,
-                #     *load_ref_path(self.in_pkg_share(self._cfg.reference_path.csv_path)), # type: ignore
-                #     cfg_ref_path.max_width,
-                #     cfg_ref_path.resolution,
-                # )
                 wp_x, wp_y, _, _ = load_ref_path(self.in_pkg_share(self._cfg.reference_path.csv_path)) # type: ignore
                 return ReferencePath(
                     map,

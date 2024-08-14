@@ -793,58 +793,6 @@ class ReferencePath:
 
         return np.array(ub_hor), np.array(lb_hor), border_cells_hor_sm
 
-class StaticReferencePath(ReferencePath):
-    def __init__(
-            self,
-            map: Map,
-            wp_x: List[float],
-            wp_y: List[float],
-            wp_psi: List[float],
-            wp_kappa: List[float],
-            max_width: float,
-            resolution: float):
-        self.org_wp_x = wp_x
-        self.org_wp_y = wp_y
-
-        # Precision
-        self.eps = 1e-12
-
-        # Map
-        self.map = map
-
-        self.resolution = resolution
-        self.circular = False
-
-        self.waypoints = self._to_waypoint_obj(wp_x, wp_y, wp_psi, wp_kappa)
-
-        # Number of waypoints
-        self.n_waypoints = len(self.waypoints)
-
-        # Length of path
-        self.length, self.segment_lengths = self._compute_length()
-
-        # Compute path width (attribute of each waypoint)
-        self._compute_width(max_width=max_width)
-
-    def _to_waypoint_obj(
-            self,
-            xs: List[float],
-            ys: List[float],
-            psis:List[float],
-            kappas: List[float]):
-
-        waypoints: List[Waypoint] = []
-
-        if not (len(xs) == len(ys) == len(psis) == len(kappas)):
-            raise ValueError(
-                f"The length of the input lists must be the same: x={len(xs)}, y={len(ys)}, psi={len(psis)}, kappa={len(kappas)}")
-
-        for i in range(len(xs)):
-            waypoints.append(Waypoint(xs[i], ys[i], psis[i], kappas[i]))
-
-        return waypoints
-
-
 if __name__ == '__main__':
 
     # Select Track | 'Real_Track' or 'Sim_Track'
