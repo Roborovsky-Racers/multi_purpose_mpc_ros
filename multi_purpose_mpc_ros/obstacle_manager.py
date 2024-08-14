@@ -24,10 +24,6 @@ class ObstacleManager:
         if self.obs_idx >= len(self.obstacles):
           self.obs_idx = 0
 
-        # Reset the map and add current obstacles
-        self.map.reset_map()
-        self.map.add_obstacles(self.current_obstacles)
-
     def push_next_obstacle_random(self):
         # Remove the oldest obstacle if the queue is full
         if len(self.current_obstacles) >= self.queue_size:
@@ -39,6 +35,7 @@ class ObstacleManager:
             next_obstacle = random.choice(available_obstacles)
             self.current_obstacles.append(next_obstacle)
 
+    def update_map(self):
         # Reset the map and add current obstacles
         self.map.reset_map()
         self.map.add_obstacles(self.current_obstacles)

@@ -1,5 +1,5 @@
 sim_logger:
-  animation_enabled: true
+  animation_enabled: false
 
 map:
   # path from pkg share dir
@@ -11,18 +11,17 @@ waypoints:
 
 obstacles:
   # path from pkg share dir
-  csv_path: "" # If empty, the obstacles information will be subscribed from the topic
-  # csv_path: "maps/occupancy_grid_map_obstacles.csv"
+  # csv_path: "" # If empty, the obstacles information will be subscribed from the topic
+  csv_path: "maps/occupancy_grid_map_obstacles.csv"
   radius: 1.25
 
 reference_path:
   # path from pkg share dir
   csv_path: ""
-  resolution: 0.4
-  smoothing_distance: 10
-
-  max_width: 5.0
-  circular: false
+  resolution: 1.0
+  smoothing_distance: 12
+  max_width: 7.5
+  circular: true
 
 bicycle_model:
   length: 1.087
@@ -30,13 +29,13 @@ bicycle_model:
 
 mpc:
   N: 30
-  Q: [3.0, 1.5, 5.0]  # [v, delta, t]
-  R: [0.0, 100.0]      # [v, delta]
+  Q: [3.0, 1.5, 5.0]
+  R: [0.0, 10.0]
   QN: [3.0, 1.5, 5.0]
   v_max: 30.0 # km/h
   a_min: -3.2 # m/s^2
   a_max: 3.2 # m/s^2
-  ay_max: 30.0 # m/s^2, maximum lateral acceleration in curves
+  ay_max: 20.0 # m/s^2, maximum lateral acceleration in curves
   delta_max_deg: 80.0 # degrees
   control_rate: 50.0 # Hz
 

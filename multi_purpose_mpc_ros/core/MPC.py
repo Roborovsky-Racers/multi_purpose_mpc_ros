@@ -58,7 +58,7 @@ class MPC:
         # Initialize Optimization Problem
         self.optimizer = osqp.OSQP()
 
-    def _init_problem(self):
+    def _init_problem(self, N):
         """
         Initialize optimization problem for current time step.
         """
@@ -70,24 +70,24 @@ class MPC:
         xmax = self.state_constraints['xmax']
 
         # LTV System Matrices
-        A = np.zeros((self.nx * (self.N + 1), self.nx * (self.N + 1)))
-        B = np.zeros((self.nx * (self.N + 1), self.nu * (self.N)))
+        A = np.zeros((self.nx * (N + 1), self.nx * (N + 1)))
+        B = np.zeros((self.nx * (N + 1), self.nu * (N)))
         # Reference vector for state and input variables
-        ur = np.zeros(self.nu*self.N)
-        xr = np.zeros(self.nx*(self.N+1))
+        ur = np.zeros(self.nu*N)
+        xr = np.zeros(self.nx*(N+1))
         # Offset for equality constraint (due to B * (u - ur))
-        uq = np.zeros(self.N * self.nx)
+        uq = np.zeros(N * self.nx)
         # Dynamic state constraints
-        xmin_dyn = np.kron(np.ones(self.N + 1), xmin)
-        xmax_dyn = np.kron(np.ones(self.N + 1), xmax)
+        xmin_dyn = np.kron(np.ones(N + 1), xmin)
+        xmax_dyn = np.kron(np.ones(N + 1), xmax)
         # Dynamic input constraints
-        umax_dyn = np.kron(np.ones(self.N), umax)
+        umax_dyn = np.kron(np.ones(N), umax)
         # Get curvature predictions from previous control signals
         kappa_pred = np.tan(np.array(self.current_control[3::] +
                                      self.current_control[-1:])) / self.model.length
 
         # Iterate over horizon
-        for n in range(self.N):
+        for n in range(N):
 
             # Get information about current waypoint
             current_waypoint = self.model.reference_path.get_waypoint(self.model.wp_id + n)
@@ -112,9 +112,11 @@ class MPC:
             if vmax_dyn < umax_dyn[self.nu*n]:
                 umax_dyn[self.nu*n] = vmax_dyn
 
+        min_width = 2*self.model.safety_margin
+
         # Compute dynamic constraints on e_y
         ub, lb, _ = self.model.reference_path.update_path_constraints(
-                    self.model.wp_id+1, self.N, 2*self.model.safety_margin,
+                    self.model.wp_id+1, N, min_width,
             self.model.safety_margin)
         xmin_dyn[0] = self.model.spatial_state.e_y
         xmax_dyn[0] = self.model.spatial_state.e_y
@@ -125,18 +127,18 @@ class MPC:
         xr[self.nx::self.nx] = (lb + ub) / 2
 
         # Get equality matrix
-        Ax = sparse.kron(sparse.eye(self.N + 1),
+        Ax = sparse.kron(sparse.eye(N + 1),
                          -sparse.eye(self.nx)) + sparse.csc_matrix(A)
         Bu = sparse.csc_matrix(B)
         Aeq = sparse.hstack([Ax, Bu])
         # Get inequality matrix
-        Aineq = sparse.eye((self.N + 1) * self.nx + self.N * self.nu)
+        Aineq = sparse.eye((N + 1) * self.nx + N * self.nu)
         # Combine constraint matrices
         A = sparse.vstack([Aeq, Aineq], format='csc')
 
         # Get upper and lower bound vectors for equality constraints
         lineq = np.hstack([xmin_dyn,
-                           np.kron(np.ones(self.N), umin)])
+                           np.kron(np.ones(N), umin)])
         uineq = np.hstack([xmax_dyn, umax_dyn])
         # Get upper and lower bound vectors for inequality constraints
         x0 = np.array(self.model.spatial_state[:])
@@ -147,12 +149,12 @@ class MPC:
         u = np.hstack([ueq, uineq])
 
         # Set cost matrices
-        P = sparse.block_diag([sparse.kron(sparse.eye(self.N), self.Q), self.QN,
-             sparse.kron(sparse.eye(self.N), self.R)], format='csc')
+        P = sparse.block_diag([sparse.kron(sparse.eye(N), self.Q), self.QN,
+             sparse.kron(sparse.eye(N), self.R)], format='csc')
         q = np.hstack(
-            [-np.tile(np.diag(self.Q.toarray()), self.N) * xr[:-self.nx],
+            [-np.tile(np.diag(self.Q.toarray()), N) * xr[:-self.nx],
              -self.QN.dot(xr[-self.nx:]),
-             -np.tile(np.diag(self.R.toarray()), self.N) * ur])
+             -np.tile(np.diag(self.R.toarray()), N) * ur])
 
         # Initialize optimizer
         self.optimizer = osqp.OSQP()
@@ -171,20 +173,27 @@ class MPC:
         # Update current waypoint
         self.model.get_current_waypoint()
 
+        # check if the horizon exceeds the number of waypoints
+        N = self.N
+        if self.model.wp_id >= self.model.reference_path.n_waypoints and not self.model.reference_path.circular:
+            N = self.model.reference_path.n_waypoints - self.model.wp_id
+            # print('Horizon exceeds number of waypoints. ')
+        # print(f"N: {N}")
+
         # Update spatial state
         self.model.spatial_state = self.model.t2s(reference_state=
             self.model.temporal_state, reference_waypoint=
             self.model.current_waypoint)
 
         # Initialize optimization problem
-        self._init_problem()
+        self._init_problem(N)
 
         # Solve optimization problem
         dec = self.optimizer.solve()
 
         try:
             # Get control signals
-            control_signals = np.array(dec.x[-self.N*nu:])
+            control_signals = np.array(dec.x[-N*nu:])
             control_signals[1::2] = np.arctan(control_signals[1::2] *
                                               self.model.length)
             v = control_signals[0]
@@ -194,10 +203,10 @@ class MPC:
             self.current_control = control_signals
 
             # Get predicted spatial states
-            x = np.reshape(dec.x[:(self.N+1)*nx], (self.N+1, nx))
+            x = np.reshape(dec.x[:(N+1)*nx], (N+1, nx))
 
             # Update predicted temporal states
-            self.current_prediction = self.update_prediction(x)
+            self.current_prediction = self.update_prediction(x, N)
 
             # Get current control signal
             u = np.array([v, delta])
@@ -205,23 +214,22 @@ class MPC:
             # if problem solved, reset infeasibility counter
             self.infeasibility_counter = 0
 
-        except:
-
-            print('Infeasible problem. Previously predicted'
-                  ' control signal used!')
+        except Exception as e:
+            # print('Infeasible problem. Previously predicted'
+            #       ' control signal used!')
             id = nu * (self.infeasibility_counter + 1)
             u = np.array(self.current_control[id:id+2])
 
             # increase infeasibility counter
             self.infeasibility_counter += 1
 
-        if self.infeasibility_counter == (self.N - 1):
-            print('No control signal computed!')
-            exit(1)
+        # if self.infeasibility_counter == (N - 1):
+        #     print('No control signal computed!')
+        #     exit(1)
 
         return u
 
-    def update_prediction(self, spatial_state_prediction):
+    def update_prediction(self, spatial_state_prediction, N):
         """
         Transform the predicted states to predicted x and y coordinates.
         Mainly for visualization purposes.
@@ -233,7 +241,7 @@ class MPC:
         x_pred, y_pred = [], []
 
         # Iterate over prediction horizon
-        for n in range(2, self.N):
+        for n in range(2, N):
             # Get associated waypoint
             associated_waypoint = self.model.reference_path.\
                 get_waypoint(self.model.wp_id+n)

@@ -13,6 +13,8 @@ WAYPOINTS = '#D0D3D4'
 PATH_CONSTRAINTS = '#F5B041'
 OBSTACLE = '#2E4053'
 
+def dist(x1, y1, x2, y2):
+    return np.sqrt((x1 - x2)**2 + (y1 - y2)**2)
 
 ############
 # Waypoint #
@@ -104,6 +106,7 @@ class ReferencePath:
 
         # Number of waypoints
         self.n_waypoints = len(self.waypoints)
+        # print(f"input waypoint: {len(wp_x)}, n_waypoints: {self.n_waypoints}")
 
         # Length of path
         self.length, self.segment_lengths = self._compute_length()
@@ -120,9 +123,9 @@ class ReferencePath:
         """
 
         # Number of waypoints
-        n_wp = [int(np.sqrt((wp_x[i + 1] - wp_x[i]) ** 2 +
+        n_wp = [max(1, int(np.sqrt((wp_x[i + 1] - wp_x[i]) ** 2 +
                             (wp_y[i + 1] - wp_y[i]) ** 2) /
-                self.resolution) for i in range(len(wp_x) - 1)]
+                self.resolution)) for i in range(len(wp_x) - 1)]
 
         # Construct waypoints with specified resolution
         gp_x, gp_y = wp_x[-1], wp_y[-1]
@@ -145,6 +148,7 @@ class ReferencePath:
 
         # Construct list of waypoint objects
         waypoints = list(zip(wp_xs, wp_ys))
+        # print(f"n_wp: {n_wp}, smooth_dist: {self.smoothing_distance}, len(wp_x): {len(wp_x)}, len way: {len(waypoints)}")
         waypoints = self._construct_waypoints(waypoints)
 
         return waypoints
@@ -207,6 +211,19 @@ class ReferencePath:
         s = sum(segment_lengths)
         return s, segment_lengths
 
+    def _is_obstacle_occupied(self, t_x, t_y):
+        for i in range(-1, 2):
+            for j in range(-1, 2):
+                # Clip the coordinates to stay within map boundaries
+                t_xi = np.clip(t_x + i, 0, self.map.width - 1)
+                t_yj = np.clip(t_y + j, 0, self.map.height - 1)
+
+                # Check if the cell is occupied
+                if self.map.data[t_yj, t_xi] == 0:
+                    return True
+        # No obstacles detected
+        return False
+
     def _compute_width(self, max_width):
         """
         Compute the width of the path by checking the maximum free space to
@@ -215,23 +232,129 @@ class ReferencePath:
         """
 
         # Iterate over all waypoints
+        self._center_x = []
+        self._center_y = []
+        self._obst_center_x = []
+        self._obst_center_y = []
+
         for wp_id, wp in enumerate(self.waypoints):
+            left_angle = np.mod(wp.psi + math.pi / 2 + math.pi,
+                             2 * math.pi) - math.pi
+            right_angle = np.mod(wp.psi - math.pi / 2 + math.pi,
+                               2 * math.pi) - math.pi
+
+            # Get pixel coordinates of waypoint
+            wp_x, wp_y = self.map.w2m(wp.x, wp.y)
+
+            # center_x, center_y = self.map.m2w(wp_x, wp_y)
+            # self._center_x.append(center_x)
+            # self._center_y.append(center_y)
+
+            # WP位置上に障害物がある場合、_get_min_width が適切な結果を返さない。
+            # その場合は、WP位置から左右にセルを捜査し、障害物がないセルのうち、より中心に近いセルを基準WPとして選択する
+            # Check if the waypoint is free of obstacles
+            # Search around the target cell for obstacles
+            if self._is_obstacle_occupied(wp_x, wp_y):
+                # Waypoint is occupied by an obstacle
+                left_clear_cell = None
+                right_clear_cell = None
+
+                # Search towards left and right walls for the first free cell
+                for dir in ['left', 'right']:
+                    angle = left_angle if dir == 'left' else right_angle
+
+                    # Get closest cell to orthogonal vector
+                    t_x, t_y = self.map.w2m(wp.x + max_width * np.cos(angle), wp.y
+                                            + max_width * np.sin(angle))
+
+                    # Get the line from the waypoint to the target cell
+                    x_list, y_list, _ = line_aa(wp_x, wp_y, t_x, t_y)
+
+                    for i in range(len(x_list)):
+                        wp_xi, wp_yi = x_list[i], y_list[i]
+
+                        # Check if the cell is occupied
+                        if self._is_obstacle_occupied(wp_xi, wp_yi):
+                            # Obstacle detected
+                            continue
+
+                        # Check for occupied cells (obstacles)
+                        occupied_indices = self.map.data[y_list[i:], x_list[i:]] == 0
+
+                        if np.any(occupied_indices):
+                            # If there are obstacles, find the nearest one
+                            obstacle_index = np.argmax(occupied_indices)
+                            obstacle_x = x_list[i+obstacle_index]
+                            obstacle_y = y_list[i+obstacle_index]
+                            min_cell = obstacle_x, obstacle_y
+                            min_width = np.hypot(wp_xi - min_cell[0], wp_yi - min_cell[1]) * self.map.resolution
+                        else:
+                            min_width = max_width
+
+                        if dir == 'left':
+                            left_clear_cell = (wp_xi, wp_yi)
+                            left_min_width = min_width
+                        else:
+                            right_clear_cell = (wp_xi, wp_yi)
+                            right_min_width = min_width
+                        break
+
+                # Determine the reference cell
+                choose_left = False
+                if left_clear_cell and right_clear_cell:
+                    isequal = abs(left_min_width - right_min_width) < 0.5
+                    if not isequal:
+                        # If one side is closer to the wall, choose the side with more free space
+                        # print(f"left_min_width: {left_min_width}, right_min_width: {right_min_width}")
+                        if left_min_width > right_min_width:
+                            choose_left = True
+                    elif wp_id > 0:
+                        # If both sides are equally close to the center, choose the side closer to the previous waypoint
+                        prev_wp = self.waypoints[wp_id - 1]
+                        prev_wp_x, prev_wp_y = self.map.w2m(prev_wp.x, prev_wp.y)
+                        left_dist_from_prev = dist(left_clear_cell[0], left_clear_cell[1], prev_wp_x, prev_wp_y)
+                        right_dist_from_prev = dist(right_clear_cell[0], right_clear_cell[1], prev_wp_x, prev_wp_y)
+                        # print(f"left_dist_from_prev: {left_dist_from_prev}, right_dist_from_prev: {right_dist_from_prev}")
+                        if left_dist_from_prev < right_dist_from_prev:
+                            choose_left = True
+                    else:
+                        # print("No previous waypoint to compare distances")
+                        choose_left = True
+                elif left_clear_cell:
+                    # print("Only left clear cell found")
+                    choose_left = True
+                elif right_clear_cell:
+                    # print("Only right clear cell found")
+                    pass
+                else:
+                    print("No free cell found in either direction")
+
+                if choose_left:
+                    wp_x, wp_y = left_clear_cell[0], left_clear_cell[1]
+                else:
+                    wp_x, wp_y = right_clear_cell[0], right_clear_cell[1]
+
+                # print(f"wp[{wp_id}] Choose left: {choose_left}, wp_x: {wp_x}, wp_y: {wp_y}")
+
+                # if left_clear_cell is not None or right_clear_cell is not None:
+                #     center_x, center_y = self.map.m2w(wp_x, wp_y)
+                #     self._obst_center_x.append(center_x)
+                #     self._obst_center_y.append(center_y)
+
             # List containing information for current waypoint
             width_info = []
+            wp_x_w, wp_y_w = self.map.m2w(wp_x, wp_y)
             # Check width left and right of the center-line
             for i, dir in enumerate(['left', 'right']):
                 # Get angle orthogonal to path in current direction
-                if dir == 'left':
-                    angle = np.mod(wp.psi + math.pi / 2 + math.pi,
-                                 2 * math.pi) - math.pi
-                else:
-                    angle = np.mod(wp.psi - math.pi / 2 + math.pi,
-                                   2 * math.pi) - math.pi
+                angle = left_angle if dir == 'left' else right_angle
+
                 # Get closest cell to orthogonal vector
-                t_x, t_y = self.map.w2m(wp.x + max_width * np.cos(angle), wp.y
+                t_x, t_y = self.map.w2m(wp_x_w + max_width * np.cos(angle), wp_y_w
                                         + max_width * np.sin(angle))
                 # Compute distance to orthogonal cell on path border
-                b_value, b_cell = self._get_min_width(wp, t_x, t_y, max_width)
+                b_value, b_cell = self._get_min_width(wp_x, wp_y, t_x, t_y, max_width)
+
                 # Add information to list for current waypoint
                 width_info.append(b_value)
                 width_info.append(b_cell)
@@ -244,11 +367,12 @@ class ReferencePath:
             wp.static_border_cells = (width_info[1], width_info[3])
             wp.dynamic_border_cells = (width_info[1], width_info[3])
 
-    def _get_min_width(self, wp, t_x, t_y, max_width):
+    def _get_min_width(self, wp_x, wp_y, t_x, t_y, max_width):
         """
         Compute the minimum distance between the current waypoint and the
         orthogonal cell on the border of the path
-        :param wp: current waypoint
+        :param wp_x: x coordinate of the reference cell in map coordinates
+        :param wp_y: y coordinate of the reference cell in map coordinates
         :param t_x: x coordinate of border cell in map coordinates
         :param t_y: y coordinate of border cell in map coordinates
         :param max_width: maximum path width in m
@@ -256,8 +380,6 @@ class ReferencePath:
         """
 
         min_width = max_width
-        # Get pixel coordinates of waypoint
-        wp_x, wp_y = self.map.w2m(wp.x, wp.y)
         path_x = np.array([])
         path_y = np.array([])
 
@@ -279,7 +401,7 @@ class ReferencePath:
                     obstacle_x = x_list[obstacle_index]
                     obstacle_y = y_list[obstacle_index]
                     min_cell = self.map.m2w(obstacle_x, obstacle_y)
-                    min_width = np.hypot(wp.x - min_cell[0], wp.y - min_cell[1])
+                    min_width = np.hypot(wp_x - min_cell[0], wp_y - min_cell[1])
                     return min_width, min_cell
                 else:
                     # If no obstacles are found, add free space coordinates
@@ -292,7 +414,7 @@ class ReferencePath:
         if path_x.size > 0 and path_y.size > 0:
             min_index = np.argmin(np.hypot(path_x - t_x, path_y - t_y))
             min_cell = self.map.m2w(path_x[min_index], path_y[min_index])
-            min_width = np.hypot(wp.x - min_cell[0], wp.y - min_cell[1])
+            min_width = np.hypot(wp_x - min_cell[0], wp_y - min_cell[1])
 
         return min_width, min_cell
 
@@ -306,6 +428,9 @@ class ReferencePath:
 
         # Set optimization horizon
         N = self.n_waypoints - 1
+        if N < 2:
+            print("Path too short for speed profile computation!")
+            return False
 
         # Constraints
         a_min = np.ones(N-1) * Constraints['a_min']
@@ -361,7 +486,13 @@ class ReferencePath:
         # Assign reference velocity to every waypoint
         for i, wp in enumerate(self.waypoints[:-1]):
             wp.v_ref = speed_profile[i]
-        self.waypoints[-1].v_ref = self.waypoints[-2].v_ref
+
+        if self.circular:
+            self.waypoints[-1].v_ref = self.waypoints[-2].v_ref
+        else:
+            self.waypoints[-1].v_ref = 0.0
+
+        return True
 
     def get_waypoint(self, wp_id):
         """
@@ -375,8 +506,9 @@ class ReferencePath:
             wp_id = np.mod(wp_id, self.n_waypoints)
         # Terminate execution if end of path reached
         elif wp_id >= self.n_waypoints and not self.circular:
-            print('Reached end of path!')
-            exit(1)
+            # print('Reached end of path!')
+            wp_id = self.n_waypoints - 1
+            # exit(1)
 
         return self.waypoints[wp_id]
 
@@ -418,7 +550,7 @@ class ReferencePath:
         wp_lb_y = np.array([wp.static_border_cells[1][1] for wp in self.waypoints])
 
         # Plot waypoints
-        # colors = [wp.v_ref for wp in self.waypoints]
+        colors = [wp.v_ref for wp in self.waypoints]
         ax.scatter(wp_x, wp_y, c=WAYPOINTS, s=10)
 
         # Plot arrows indicating drivable area
@@ -451,6 +583,9 @@ class ReferencePath:
             ax.plot((bl_x[-2], br_x[-2]), (bl_y[-2], br_y[-2]), color=OBSTACLE)
             ax.plot((bl_x[0], br_x[0]), (bl_y[0], br_y[0]), color=OBSTACLE)
 
+        ax.plot(self._center_x, self._center_y, "o", color="red", markersize=1)
+        ax.plot(self._obst_center_x, self._obst_center_y, "o", color="blue", markersize=5)
+
         # Plot dynamic path constraints
         # Get x and y locations of border cells for upper and lower bound
         wp_ub_x = np.array([wp.dynamic_border_cells[0][0] for wp in self.waypoints] +
@@ -461,12 +596,12 @@ class ReferencePath:
                            [self.waypoints[0].static_border_cells[1][0]])
         wp_lb_y = np.array([wp.dynamic_border_cells[1][1] for wp in self.waypoints] +
                            [self.waypoints[0].static_border_cells[1][1]])
-        ax.plot(wp_ub_x, wp_ub_y, c=PATH_CONSTRAINTS)
-        ax.plot(wp_lb_x, wp_lb_y, c=PATH_CONSTRAINTS)
+        ax.plot(wp_ub_x[0:-1], wp_ub_y[0:-1], c=PATH_CONSTRAINTS)
+        ax.plot(wp_lb_x[0:-1], wp_lb_y[0:-1], c=PATH_CONSTRAINTS)
 
         # Plot obstacles
-        for obstacle in self.map.obstacles:
-            obstacle.show(ax=ax)
+        # for obstacle in self.map.obstacles:
+        #     obstacle.show(ax=ax)
 
 
     def _compute_free_segments(self, wp, min_width):

@@ -19,6 +19,7 @@ from geometry_msgs.msg import Quaternion, Pose2D
 
 # autoware
 from autoware_auto_control_msgs.msg import AckermannControlCommand
+from autoware_auto_planning_msgs.msg import Trajectory
 
 # Multi_Purpose_MPC
 from multi_purpose_mpc_ros.core.map import Map, Obstacle
@@ -30,16 +31,18 @@ from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec
 # Project
 from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
 from multi_purpose_mpc_ros.simulation_logger import SimulationLogger
+from multi_purpose_mpc_ros.obstacle_manager import ObstacleManager
 
-def array_to_ackermann_control_command(stamp, u: np.ndarray, a_max: float) -> AckermannControlCommand:
+def array_to_ackermann_control_command(stamp, u: np.ndarray, acc: float) -> AckermannControlCommand:
     msg = AckermannControlCommand()
     msg.stamp = stamp
     msg.lateral.stamp = stamp
     msg.lateral.steering_tire_angle = u[1]
     msg.lateral.steering_tire_rotation_rate = 2.0
     msg.longitudinal.stamp = stamp
-    msg.longitudinal.speed = u[0]
-    msg.longitudinal.acceleration = a_max
+    msg.longitudinal.speed = 0.0  #u[0]
+    msg.longitudinal.acceleration = acc
+    # msg.longitudinal.acceleration = -acc  # hack!!!!
     return msg
 
 def yaw_from_quaternion(q: Quaternion):
@@ -120,6 +123,33 @@ class MPCController(Node):
             file_exists(self.in_pkg_share(file_path))
         return cfg
 
+    def _create_reference_path_from_autoware_trajectory(self, trajectory: Trajectory) -> ReferencePath:
+        wp_x = [0] * len(trajectory.points)
+        wp_y = [0] * len(trajectory.points)
+        for i, p in enumerate(trajectory.points):
+            wp_x[i] = p.pose.position.x
+            wp_y[i] = p.pose.position.y
+
+        cfg_ref_path = self._cfg.reference_path # type: ignore
+        reference_path = ReferencePath(
+            self._map,
+            wp_x,
+            wp_y,
+            cfg_ref_path.resolution,
+            cfg_ref_path.smoothing_distance,
+            cfg_ref_path.max_width,
+            cfg_ref_path.circular)
+
+        mpc_config = self._mpc_cfg
+        speed_profile_constraints = {
+            "a_min": mpc_config.a_min, "a_max": mpc_config.a_max,
+            "v_min": 0.0, "v_max": mpc_config.v_max, "ay_max": mpc_config.ay_max}
+
+        if not reference_path.compute_speed_profile(speed_profile_constraints):
+            return None
+
+        return reference_path
+
     def _initialize(self) -> None:
         def create_map() -> Map:
             return Map(self.in_pkg_share(self._cfg.map.yaml_path)) # type: ignore
@@ -145,6 +175,7 @@ class MPCController(Node):
                 obstacles = []
                 for cx, cy in zip(obs_x, obs_y):
                     obstacles.append(Obstacle(cx=cx, cy=cy, radius=self._cfg.obstacles.radius)) # type: ignore
+                self._obstacle_manager = ObstacleManager(map, obstacles)
                 return obstacles
             else:
                 return []
@@ -218,6 +249,8 @@ class MPCController(Node):
             Float64MultiArray, "/aichallenge/objects", self._obstacles_callback, 1)
         self._control_mode_request_sub = self.create_subscription(
             Bool, "control/control_mode_request_topic", self._control_mode_request_callback, 1)
+        self._trajectory_sub = self.create_subscription(
+            Trajectory, "planning/scenario_planning/trajectory", self._trajectory_callback, 1)
 
     def _odom_callback(self, msg: Odometry) -> None:
         self._odom = msg
@@ -229,6 +262,7 @@ class MPCController(Node):
         obstacles_updated = (self._last_obstacles_msgs_raw != msg.data) and (len(msg.data) > 0)
         if obstacles_updated:
             self._last_obstacles_msgs_raw = msg.data
+            self._obstacles = []
             for i in range(0, len(msg.data), 4):
                 x = msg.data[i]
                 y = msg.data[i + 1]
@@ -240,6 +274,9 @@ class MPCController(Node):
         if msg.data:
             self.get_logger().info("Control mode request received")
             self._enable_control = True
+
+    def _trajectory_callback(self, msg):
+        self._trajectory = msg
 
     def _wait_until_odom_received(self, timeout: float = 30.) -> None:
         t_start = self.get_clock().now()
@@ -261,39 +298,82 @@ class MPCController(Node):
             rate.sleep()
 
     def run(self) -> None:
+        SHOW_PLOT_ANIMATION = False
+        PLOT_RESULTS = False
+        ANIMATION_INTERVAL = 20
+
         self._wait_until_odom_received()
         self._wait_until_control_mode_request_received()
         control_rate = self.create_rate(self._mpc_cfg.control_rate)
 
         pose = odom_to_pose_2d(self._odom) # type: ignore
         self._car.update_states(pose.x, pose.y, pose.theta)
+
         self._car.update_reference_path(self._car.reference_path)
 
         sim_logger = SimulationLogger(
             self.get_logger(),
-            self._car.temporal_state.x, self._car.temporal_state.y, True, False, True, 50)
+            self._car.temporal_state.x, self._car.temporal_state.y, self._cfg.sim_logger.animation_enabled, SHOW_PLOT_ANIMATION, PLOT_RESULTS, ANIMATION_INTERVAL)
 
         self.get_logger().info(f"START!")
 
         loop = 0
         lap_times = []
         next_lap_start = False
-        MAX_LAPS=6
+
+        kp = 100.0
+        last_u = np.array([0.0, 0.0])
+
+        # for i in range(10):
+        #     self._obstacle_manager.push_next_obstacle()
 
         t_start = self.get_clock().now()
-        while rclpy.ok() and (not sim_logger.stop_requested()) and len(lap_times) < MAX_LAPS:
+        last_t = t_start
+        while rclpy.ok() and (not sim_logger.stop_requested()):# and len(lap_times) < MAX_LAPS:
+            control_rate.sleep()
+
+            if self._trajectory is None:
+                continue
+
+            if loop % 100 == 0:
+                # update obstacles
+                if not self._use_obstacles_topic:
+                    # self._obstacle_manager.push_next_obstacle()
+                    self._obstacles = self._obstacle_manager.current_obstacles
+                    self._obstacles_updated = True
+
+                # update reference path
+                new_referece_path = self._create_reference_path_from_autoware_trajectory(self._trajectory)
+                if new_referece_path is not None:
+                    self._car.reference_path = new_referece_path
+                    self._car.update_reference_path(self._car.reference_path)
+
+                def plot_reference_path(car):
+                    import matplotlib.pyplot as plt
+                    import sys
+                    fig, ax = plt.subplots(1, 1)
+                    car.reference_path.show(ax)
+                    plt.show()
+                    sys.exit(1)
+                # plot_reference_path(self._car)
+
             loop += 1
+
             now = self.get_clock().now()
             t = (now - t_start).nanoseconds / 1e9
+            dt = (now - last_t).nanoseconds / 1e9
+            last_t = now
 
             if self._obstacles_updated:
                 self._obstacles_updated = False
-                self.get_logger().info("Obstacles updated")
+                # self.get_logger().info("Obstacles updated")
                 self._map.reset_map()
                 self._map.add_obstacles(self._obstacles)
 
 
             pose = odom_to_pose_2d(self._odom) # type: ignore
+            v = self._odom.twist.twist.linear.x
+
             self._car.update_states(pose.x, pose.y, pose.theta)
             # print(f"car x: {self._car.temporal_state.x}, y: {self._car.temporal_state.y}, psi: {self._car.temporal_state.psi}")
             # print(f"mpc x: {self._mpc.model.temporal_state.x}, y: {self._mpc.model.temporal_state.y}, psi: {self._mpc.model.temporal_state.psi}")
@@ -302,26 +382,23 @@ class MPCController(Node):
             # self.get_logger().info(f"u: {u}")
 
             if len(u) == 0:
-                self.get_logger().error("No control signal")
-                control_rate.sleep()
+                self.get_logger().error("No control signal", throttle_duration_sec=1)
+                continue
+
+            acc =  kp * (u[0] - v)
+            # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
+            acc = np.clip(acc, self._mpc_cfg.a_min, self._mpc_cfg.a_max)
+            # print(acc)
+            u[0] = np.clip(last_u[0] + acc * dt, 0.0, self._mpc_cfg.v_max)
+            last_u[0] = u[0]
+            last_u[1] = u[1]
 
             self._car.drive(u)
-            self._command_pub.publish(array_to_ackermann_control_command(now.to_msg(), u, self._cfg.mpc.a_max)) # type: ignore
+            self._command_pub.publish(array_to_ackermann_control_command(now.to_msg(), u, acc)) #ignore
 
             # Log states
             sim_logger.log(self._car, u, t)
-
-            if self._cfg.sim_logger.animation_enabled: # type: ignore
-                sim_logger.plot_animation(t, 0, lap_times, u, self._mpc, self._car)
-
-            # Push next obstacle
-            if loop % 50 == 0:
-                # obstacle_manager.push_next_obstacle_random()
-
-                # update reference path
-                # 現在は、同じコースを何周もするだけ
-                # (コースの途中で reference_path を更新してもOK)
-                self._car.update_reference_path(self._car.reference_path)
+            sim_logger.plot_animation(t, loop, lap_times, u, self._mpc, self._car)
 
             # Check if a lap has been completed
             if (next_lap_start and self._car.s >= self._car.reference_path.length or next_lap_start and self._car.s < self._car.reference_path.length / 20.0):
@@ -332,16 +409,14 @@ class MPCController(Node):
                 lap_times.append(lap_time)
                 next_lap_start = False
 
-                self.get_logger().info(f'Lap {len(lap_times)} completed! Lap time: {lap_time} s')
+                # self.get_logger().info(f'Lap {len(lap_times)} completed! Lap time: {lap_time} s')
 
             # LAPインクリメント直後にゴール付近WPを最近傍WPとして認識してしまうと、 s>=lengthとなり
             # 次の周回がすぐに終了したと判定されてしまう場合があるため、
             # 誤判定防止のために少しだけ余計に走行した後に次の周回が開始したと判定する
             if not next_lap_start and (self._car.reference_path.length / 10.0 < self._car.s and self._car.s < self._car.reference_path.length / 10.0 * 2.0):
                 next_lap_start = True
-                self.get_logger().info(f'Next lap start!')
-
-            control_rate.sleep()
+                # self.get_logger().info(f'Next lap start!')
 
         # show results
         sim_logger.show_results(lap_times, self._car)

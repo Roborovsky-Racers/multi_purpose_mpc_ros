@@ -20,6 +20,7 @@ class SimulationLogger:
         self._show_plot_animation = show_plot_animation
         self._plot_results = plot_results
         self._animation_interval = animation_interval
+        self._pose_buffer_size = 5000
 
         self._stop_requested = False
 
@@ -40,8 +41,14 @@ class SimulationLogger:
             self.fig.canvas.mpl_connect('key_press_event', self.on_key)
 
         # Logging containers
-        self.x_log = [init_x]
-        self.y_log = [init_y]
+        self.init_x = init_x
+        self.init_y = init_y
+        self.x_log = np.full(self._pose_buffer_size, np.nan)
+        self.y_log = np.full(self._pose_buffer_size, np.nan)
+        self.x_log[0] = init_x
+        self.y_log[0] = init_y
+        self.pose_log_idx = 1
+
         self.v_log = [0.0]
         self.t_log = [0.0]
         self.delta_log = [0.0]
@@ -55,8 +62,10 @@ class SimulationLogger:
 
     def log(self, car, u, t):
         # Log car state
-        self.x_log.append(car.temporal_state.x)
-        self.y_log.append(car.temporal_state.y)
+        self.x_log[self.pose_log_idx] = car.temporal_state.x
+        self.y_log[self.pose_log_idx] = car.temporal_state.y
+        self.pose_log_idx = (self.pose_log_idx + 1) % self._pose_buffer_size
+
         self.v_log.append(m_per_sec_to_kmh(u[0]))
         self.delta_log.append(np.degrees(u[1]))
         self.t_log.append(t)
@@ -76,8 +85,10 @@ class SimulationLogger:
                 mpc.show_prediction(self.axes[idx])
 
                 # Plot passed path
-                self.axes[idx].plot(self.x_log[0], self.y_log[0], 'b*')
-                self.axes[idx].plot(self.x_log, self.y_log)
+                self.axes[idx].plot(self.init_x, self.init_y, 'b*')
+                x_log_ordered = np.concatenate((self.x_log[self.pose_log_idx:], self.x_log[:self.pose_log_idx]))
+                y_log_ordered = np.concatenate((self.y_log[self.pose_log_idx:], self.y_log[:self.pose_log_idx]))
+                self.axes[idx].plot(x_log_ordered, y_log_ordered)
 
                 lap_time = lap_times[-1] if len(lap_times) > 0 else 0
 
@@ -102,7 +113,6 @@ class SimulationLogger:
             if idx > 0:
                 plt.tight_layout()
                 plt.pause(0.001)
-
 
     def show_results(self, lap_times, car):
         total_time = sum(lap_times)

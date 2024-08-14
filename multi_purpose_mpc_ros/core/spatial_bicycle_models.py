@@ -250,6 +250,8 @@ class SpatialBicycleModel(ABC):
 
         # Model ellipsoid around the car
         safety_margin = self.width / np.sqrt(2)
+        # safety_margin = self.width / np.sqrt(2) / 2.0
+        # safety_margin = 0.0
 
         return safety_margin
 
@@ -462,13 +464,19 @@ class BicycleModel(SpatialBicycleModel):
         # Construct Jacobian Matrix
         a_1 = np.array([1, delta_s, 0])
         a_2 = np.array([-kappa_ref ** 2 * delta_s, 1, 0])
-        a_3 = np.array([-kappa_ref / v_ref * delta_s, 0, 1])
 
         b_1 = np.array([0, 0])
         b_2 = np.array([0, delta_s])
-        b_3 = np.array([-1 / (v_ref ** 2) * delta_s, 0])
 
-        f = np.array([0.0, 0.0, 1 / v_ref * delta_s])
+        # Handle v_ref == 0 case
+        if v_ref == 0:
+            a_3 = np.array([0, 0, 1])
+            b_3 = np.array([0, 0])
+            f = np.array([0.0, 0.0, 0.0])
+        else:
+            a_3 = np.array([-kappa_ref / v_ref * delta_s, 0, 1])
+            b_3 = np.array([-1 / (v_ref ** 2) * delta_s, 0])
+            f = np.array([0.0, 0.0, 1 / v_ref * delta_s])
 
         A = np.stack((a_1, a_2, a_3), axis=0)
         B = np.stack((b_1, b_2, b_3), axis=0)
