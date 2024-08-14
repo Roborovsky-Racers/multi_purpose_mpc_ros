@@ -13,7 +13,7 @@ from rclpy.node import Node
 from ament_index_python.packages import get_package_share_directory
 from rclpy.parameter import Parameter
 
-from std_msgs.msg import Bool, Float64MultiArray
+from std_msgs.msg import Bool, Float32MultiArray, Float64MultiArray
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Quaternion, Pose2D
 
@@ -237,6 +237,11 @@ class MPCController(Node):
         self._obstacles_updated = False
         self._last_obstacles_msgs_raw = None
 
+        # Laps
+        self._last_laps = None
+        self._last_lap_time = 0.0
+        self._lap_times = [0.0] * 6
+
     def _setup_pub_sub(self) -> None:
         # Publishers
         self._command_pub = self.create_publisher(
@@ -251,6 +256,8 @@ class MPCController(Node):
             Bool, "control/control_mode_request_topic", self._control_mode_request_callback, 1)
         self._trajectory_sub = self.create_subscription(
             Trajectory, "planning/scenario_planning/trajectory", self._trajectory_callback, 1)
+        self._awsim_status_sub = self.create_subscription(
+            Float32MultiArray, "/aichallenge/awsim/status", self._awsim_status_callback, 1)
 
     def _odom_callback(self, msg: Odometry) -> None:
         self._odom = msg
@@ -277,6 +284,21 @@ class MPCController(Node):
 
     def _trajectory_callback(self, msg):
         self._trajectory = msg
+
+    def _awsim_status_callback(self, msg):
+        laps = int(msg.data[1])
+        lap_time = msg.data[2]
+        # section = int(msg.data[3])
+
+        if self._last_laps is None:
+            self._last_laps = 1 if laps == 0 else laps
+
+        if laps > self._last_laps:
+            self.get_logger().info(f'Lap {self._last_laps} completed! Lap time: {self._last_lap_time} s')
+            self._lap_times[self._last_laps-1] = self._last_lap_time
+            self._last_laps = laps
+
+        self._last_lap_time = lap_time
 
     def _wait_until_odom_received(self, timeout: float = 30.) -> None:
         t_start = self.get_clock().now()
@@ -318,9 +340,6 @@ class MPCController(Node):
         self.get_logger().info(f"START!")
 
         loop = 0
-        lap_times = []
-        next_lap_start = False
-
         kp = 100.0
         last_u = np.array([0.0, 0.0])
 
@@ -370,7 +389,6 @@ class MPCController(Node):
                 self._map.reset_map()
                 self._map.add_obstacles(self._obstacles)
 
-
             pose = odom_to_pose_2d(self._odom) # type: ignore
             v = self._odom.twist.twist.linear.x
 
@@ -398,28 +416,10 @@ class MPCController(Node):
 
             # Log states
             sim_logger.log(self._car, u, t)
-            sim_logger.plot_animation(t, loop, lap_times, u, self._mpc, self._car)
-
-            # Check if a lap has been completed
-            if (next_lap_start and self._car.s >= self._car.reference_path.length or next_lap_start and self._car.s < self._car.reference_path.length / 20.0):
-                if len(lap_times) > 0:
-                    lap_time = t - sum(lap_times)
-                else:
-                    lap_time = t
-                lap_times.append(lap_time)
-                next_lap_start = False
-
-                # self.get_logger().info(f'Lap {len(lap_times)} completed! Lap time: {lap_time} s')
-
-            # LAPインクリメント直後にゴール付近WPを最近傍WPとして認識してしまうと、 s>=lengthとなり
-            # 次の周回がすぐに終了したと判定されてしまう場合があるため、
-            # 誤判定防止のために少しだけ余計に走行した後に次の周回が開始したと判定する
-            if not next_lap_start and (self._car.reference_path.length / 10.0 < self._car.s and self._car.s < self._car.reference_path.length / 10.0 * 2.0):
-                next_lap_start = True
-                # self.get_logger().info(f'Next lap start!')
+            sim_logger.plot_animation(t, loop, self._last_laps, self._lap_times, u, self._mpc, self._car)
 
         # show results
-        sim_logger.show_results(lap_times, self._car)
+        sim_logger.show_results(self._last_laps, self._lap_times, self._car)
 
     @classmethod
     def in_pkg_share(cls, file_path: str) -> str:

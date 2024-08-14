@@ -70,7 +70,7 @@ class SimulationLogger:
         self.delta_log.append(np.degrees(u[1]))
         self.t_log.append(t)
 
-    def plot_animation(self, t, loop, lap_times, u, mpc: MPC, car):
+    def plot_animation(self, t, loop, last_laps, lap_times, u, mpc: MPC, car):
         idx = 0
 
         if loop % self._animation_interval == 0:
@@ -90,10 +90,11 @@ class SimulationLogger:
                 y_log_ordered = np.concatenate((self.y_log[self.pose_log_idx:], self.y_log[:self.pose_log_idx]))
                 self.axes[idx].plot(x_log_ordered, y_log_ordered)
 
-                lap_time = lap_times[-1] if len(lap_times) > 0 else 0
+                last_laps = 1 if last_laps is None else last_laps
+                lap_time = lap_times[last_laps-1]
 
                 # Set figure title
-                self.axes[idx].set_title(f'MPC Simulation: v(t): {m_per_sec_to_kmh(u[0]):.2f} km/s,\ndelta(t): {np.degrees(u[1]):.2f} deg, Duration: {format_time(t)},\nLap: {len(lap_times)}, Lap time {format_time(lap_time)}', fontsize=10)
+                self.axes[idx].set_title(f'MPC Simulation: v(t): {m_per_sec_to_kmh(u[0]):.2f} km/s,\ndelta(t): {np.degrees(u[1]):.2f} deg, Duration: {format_time(t)},\nLap: {last_laps}, Lap time {format_time(lap_time)}', fontsize=10)
                 self.axes[idx].axis('off')
                 idx += 1
 
@@ -114,7 +115,7 @@ class SimulationLogger:
                 plt.tight_layout()
                 plt.pause(0.001)
 
-    def show_results(self, lap_times, car):
+    def show_results(self, last_laps, lap_times, car):
         total_time = sum(lap_times)
         ave_lap_time = total_time / len(lap_times) if len(lap_times) > 0 else 0
         fastest_lap_time = min(lap_times) if len(lap_times) > 0 else 0
@@ -126,8 +127,8 @@ class SimulationLogger:
         self._logger.info(f" Average Lap time: {format_time(ave_lap_time)} s")
         self._logger.info(f" Fastest Lap time: {format_time(fastest_lap_time)} s")
         self._logger.info("-----------------------------------------")
-        for i, lap_time in enumerate(lap_times):
-            self._logger.info(f"       Lap {i+1} time: {format_time(lap_time)} s")
+        for i in range(last_laps):
+            self._logger.info(f"       Lap {i+1} time: {format_time(lap_times[i])} s")
         self._logger.info("#########################################")
 
         if self._plot_results:
