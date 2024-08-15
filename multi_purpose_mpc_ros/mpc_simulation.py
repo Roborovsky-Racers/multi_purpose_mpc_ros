@@ -38,7 +38,7 @@ class MPCSimulation:
             car.reference_path.show(ax)
             plt.show()
             sys.exit(1)
-        plot_reference_path(car)
+        # plot_reference_path(car)
 
         obstacles: List[Obstacle] = copy.deepcopy(self._controller._obstacles)
         obstacle_manager = ObstacleManager(map, obstacles)
@@ -72,7 +72,6 @@ class MPCSimulation:
 
             # Plot animation
             sim_logger.plot_animation(t, loop, lap_times, u, mpc, car)
-            import time
 
             # Push next obstacle
             if loop % 50 == 0:
