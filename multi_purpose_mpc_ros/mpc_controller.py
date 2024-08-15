@@ -6,6 +6,7 @@ import dataclasses
 from scipy import sparse
 from scipy.sparse import dia_matrix
 import numpy as np
+import time
 
 # ROS 2
 import rclpy
@@ -26,7 +27,7 @@ from multi_purpose_mpc_ros.core.map import Map, Obstacle
 from multi_purpose_mpc_ros.core.reference_path import ReferencePath
 from multi_purpose_mpc_ros.core.spatial_bicycle_models import BicycleModel
 from multi_purpose_mpc_ros.core.MPC import MPC
-from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec
+from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec, load_ref_path
 
 # Project
 from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
@@ -88,6 +89,9 @@ class MPCConfig:
 class MPCController(Node):
 
     PKG_PATH: str = get_package_share_directory('multi_purpose_mpc_ros') + "/"
+    USE_BUG_ACC = False
+    BUG_VEL = 40.0 # km/h
+    BUG_ACC = 400.0
 
     def __init__(self, config_path: str) -> None:
         super().__init__("mpc_controller") # type: ignore
@@ -155,17 +159,34 @@ class MPCController(Node):
             return Map(self.in_pkg_share(self._cfg.map.yaml_path)) # type: ignore
 
         def create_ref_path(map: Map) -> ReferencePath:
-            wp_x, wp_y = load_waypoints(self.in_pkg_share(self._cfg.waypoints.csv_path)) # type: ignore
-
             cfg_ref_path = self._cfg.reference_path # type: ignore
-            return ReferencePath(
-                map,
-                wp_x,
-                wp_y,
-                cfg_ref_path.resolution,
-                cfg_ref_path.smoothing_distance,
-                cfg_ref_path.max_width,
-                cfg_ref_path.circular)
+
+            is_ref_path_given = cfg_ref_path.csv_path != "" # type: ignore
+            if is_ref_path_given:
+                print("Using given reference path")
+                wp_x, wp_y, _, _ = load_ref_path(self.in_pkg_share(self._cfg.reference_path.csv_path)) # type: ignore
+                return ReferencePath(
+                    map,
+                    wp_x,
+                    wp_y,
+                    cfg_ref_path.resolution,
+                    cfg_ref_path.smoothing_distance,
+                    cfg_ref_path.max_width,
+                    cfg_ref_path.circular)
+
+            else:
+                print("Using waypoints to create reference path")
+                wp_x, wp_y = load_waypoints(self.in_pkg_share(self._cfg.waypoints.csv_path)) # type: ignore
+
+                return ReferencePath(
+                    map,
+                    wp_x,
+                    wp_y,
+                    cfg_ref_path.resolution,
+                    cfg_ref_path.smoothing_distance,
+                    cfg_ref_path.max_width,
+                    cfg_ref_path.circular)
+
 
         def create_obstacles() -> List[Obstacle]:
             use_csv_obstacles = self._cfg.obstacles.csv_path != "" # type: ignore
@@ -175,7 +196,7 @@ class MPCController(Node):
                 obstacles = []
                 for cx, cy in zip(obs_x, obs_y):
                     obstacles.append(Obstacle(cx=cx, cy=cy, radius=self._cfg.obstacles.radius)) # type: ignore
-                self._obstacle_manager = ObstacleManager(map, obstacles)
+                self._obstacle_manager = ObstacleManager(self._map, obstacles)
                 return obstacles
             else:
                 return []
@@ -195,7 +216,7 @@ class MPCController(Node):
                 sparse.diags(cfg_mpc.Q),
                 sparse.diags(cfg_mpc.R),
                 sparse.diags(cfg_mpc.QN),
-                kmh_to_m_per_sec(cfg_mpc.v_max),
+                kmh_to_m_per_sec(self.BUG_VEL if self.USE_BUG_ACC else cfg_mpc.v_max),
                 cfg_mpc.a_min,
                 cfg_mpc.a_max,
                 cfg_mpc.ay_max,
@@ -231,6 +252,8 @@ class MPCController(Node):
         self._car = create_car(self._reference_path)
         self._mpc_cfg, self._mpc = create_mpc(self._car)
         compute_speed_profile(self._car, self._mpc_cfg)
+
+        self._trajectory: Optional[Trajectory] = None
 
         # Obstacles
         self._use_obstacles_topic = self._obstacles == []
@@ -313,7 +336,7 @@ class MPCController(Node):
 
         sim_logger = SimulationLogger(
             self.get_logger(),
-            self._car.temporal_state.x, self._car.temporal_state.y, self._cfg.sim_logger.animation_enabled, SHOW_PLOT_ANIMATION, PLOT_RESULTS, ANIMATION_INTERVAL)
+            self._car.temporal_state.x, self._car.temporal_state.y, self._cfg.sim_logger.animation_enabled, SHOW_PLOT_ANIMATION, PLOT_RESULTS, ANIMATION_INTERVAL) # type: ignore
 
         self.get_logger().info(f"START!")
 
@@ -332,7 +355,7 @@ class MPCController(Node):
         while rclpy.ok() and (not sim_logger.stop_requested()):# and len(lap_times) < MAX_LAPS:
             control_rate.sleep()
 
-            if self._trajectory is None:
+            if self._cfg.reference_path.update_by_topic and self._trajectory is None: # type: ignore
                 continue
 
             if loop % 100 == 0:
@@ -343,10 +366,11 @@ class MPCController(Node):
                     self._obstacles_updated = True
 
                 # update reference path
-                new_referece_path = self._create_reference_path_from_autoware_trajectory(self._trajectory)
-                if new_referece_path is not None:
-                    self._car.reference_path = new_referece_path
-                    self._car.update_reference_path(self._car.reference_path)
+                if self._cfg.reference_path.update_by_topic: # type: ignore
+                    new_referece_path = self._create_reference_path_from_autoware_trajectory(self._trajectory)
+                    if new_referece_path is not None:
+                        self._car.reference_path = new_referece_path
+                        self._car.update_reference_path(self._car.reference_path)
 
                 def plot_reference_path(car):
                     import matplotlib.pyplot as plt
@@ -385,16 +409,26 @@ class MPCController(Node):
                 self.get_logger().error("No control signal", throttle_duration_sec=1)
                 continue
 
-            acc =  kp * (u[0] - v)
-            # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
-            acc = np.clip(acc, self._mpc_cfg.a_min, self._mpc_cfg.a_max)
-            # print(acc)
+            acc = 0.
+            if self.USE_BUG_ACC:
+                acc = self.BUG_ACC
+            else:
+                acc =  kp * (u[0] - v)
+                # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
+                acc = np.clip(acc, self._mpc_cfg.a_min, self._mpc_cfg.a_max)
             u[0] = np.clip(last_u[0] + acc * dt, 0.0, self._mpc_cfg.v_max)
             last_u[0] = u[0]
             last_u[1] = u[1]
 
+
             self._car.drive(u)
-            self._command_pub.publish(array_to_ackermann_control_command(now.to_msg(), u, acc)) #ignore
+            if self.USE_BUG_ACC:
+                for _ in range(10):
+                    tmp_now = self.get_clock().now()
+                    self._command_pub.publish(array_to_ackermann_control_command(tmp_now.to_msg(), u, acc)) #ignore
+                    time.sleep((1.0/self._mpc_cfg.control_rate)/30.)
+            else:
+                self._command_pub.publish(array_to_ackermann_control_command(now.to_msg(), u, acc)) #ignore
 
             # Log states
             sim_logger.log(self._car, u, t)

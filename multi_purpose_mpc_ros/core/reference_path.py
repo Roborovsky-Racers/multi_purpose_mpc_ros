@@ -1,3 +1,4 @@
+from typing import List
 import numpy as np
 import numpy.ma as ma
 import math
@@ -121,6 +122,11 @@ class ReferencePath:
         :param wp_y: y coordinates of waypoints in global coordinates
         :return: list of waypoint objects
         """
+
+        if self.circular:
+            # insert the first smoothing_distance points to the end of the list
+            wp_x = wp_x + wp_x[:self.smoothing_distance]
+            wp_y = wp_y + wp_y[:self.smoothing_distance]
 
         # Number of waypoints
         n_wp = [max(1, int(np.sqrt((wp_x[i + 1] - wp_x[i]) ** 2 +
@@ -787,7 +793,6 @@ class ReferencePath:
             wp.dynamic_border_cells = bound_cells_sm
 
         return np.array(ub_hor), np.array(lb_hor), border_cells_hor_sm
-
 
 if __name__ == '__main__':
 

@@ -7,7 +7,8 @@ map:
 
 waypoints:
   # path from pkg share dir
-  csv_path: "maps/occupancy_grid_map_waypoints.csv"
+  # csv_path: "maps/occupancy_grid_map_waypoints.csv"
+  csv_path: ""
 
 obstacles:
   # path from pkg share dir
@@ -16,21 +17,22 @@ obstacles:
   radius: 1.25
 
 reference_path:
+  update_by_topic: false # When true, 'circle' must be false
   # path from pkg share dir
   csv_path: ""
+  csv_path: "maps/optimized_traj_mintime.csv"
   resolution: 0.4
-  smoothing_distance: 10
-
-  max_width: 5.0
-  circular: false
+  smoothing_distance: 5
+  max_width: 6.0
+  circular: true
 
 bicycle_model:
   length: 1.087
-  width: 1.45
+  width: 1.15
 
 mpc:
   N: 30
-  Q: [3.0, 1.5, 5.0]  # [v, delta, t]
+  Q: [3.0, 100.0, 5.0]  # [v, delta, t]
   R: [0.0, 100.0]      # [v, delta]
   QN: [3.0, 1.5, 5.0]
   v_max: 30.0 # km/h
