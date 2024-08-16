@@ -7,16 +7,19 @@ from scipy import sparse
 from scipy.sparse import dia_matrix
 import numpy as np
 import time
+import copy
 
 # ROS 2
 import rclpy
 from rclpy.node import Node
 from ament_index_python.packages import get_package_share_directory
 from rclpy.parameter import Parameter
+from visualization_msgs.msg import Marker, MarkerArray
+from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 
 from std_msgs.msg import Bool, Float64MultiArray
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Quaternion, Pose2D
+from geometry_msgs.msg import Quaternion, Pose2D, Point
 
 # autoware
 from autoware_auto_control_msgs.msg import AckermannControlCommand
@@ -112,6 +115,8 @@ class MPCController(Node):
     def destroy(self) -> None:
         self._timer.destroy() # type: ignore
         self._command_pub.shutdown() # type: ignore
+        self._mpc_pred_pub.shutdown() # type: ignore
+        self._ref_path_pub.shutdown() # type: ignore
         self._odom_sub.shutdown() # type: ignore
         self._obstacles_sub.shutdown() # type: ignore
         self._group.destroy() # type: ignore
@@ -264,6 +269,11 @@ class MPCController(Node):
         # Publishers
         self._command_pub = self.create_publisher(
             AckermannControlCommand, "/control/command/control_cmd", 1)
+        self._mpc_pred_pub = self.create_publisher(
+            MarkerArray, "/mpc/prediction", 1)
+        latching_qos = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
+        self._ref_path_pub = self.create_publisher(
+            MarkerArray, "/mpc/ref_path", latching_qos)
 
         # Subscribers
         self._odom_sub = self.create_subscription(
@@ -303,7 +313,6 @@ class MPCController(Node):
 
     def _wait_until_odom_received(self, timeout: float = 30.) -> None:
         t_start = self.get_clock().now()
-        self.get_logger().info(f"t_start: {t_start}")
         rate = self.create_rate(30)
         while self._odom is None:
             now = self.get_clock().now()
@@ -319,6 +328,56 @@ class MPCController(Node):
             if (now - t_start).nanoseconds > timeout * 1e9:
                 raise TimeoutError("Timeout while waiting for control mode request message")
             rate.sleep()
+
+    def _publish_mpc_pred_marker(self, x_pred, y_pred):
+        pred_marker_array = MarkerArray()
+        m_base = Marker()
+        m_base.header.frame_id = "map"
+        m_base.ns = "mpc_pred"
+        m_base.type = Marker.SPHERE
+        m_base.action = Marker.ADD
+        m_base.pose.position.z = 0.0
+        m_base.scale.x = 0.3
+        m_base.scale.y = 0.3
+        m_base.scale.z = 0.3
+        m_base.color.a = 1.0
+        m_base.color.r = 0.0
+        m_base.color.g = 1.0
+        m_base.color.b = 0.0
+        for i in range(len(x_pred)):
+            m = copy.deepcopy(m_base)
+            m.id = i
+            m.pose.position.x = x_pred[i]
+            m.pose.position.y = y_pred[i]
+            pred_marker_array.markers.append(m) # type: ignore
+        self._mpc_pred_pub.publish(pred_marker_array)
+
+    def _publish_ref_path_marker(self, ref_path: ReferencePath):
+        ref_path_marker_array = MarkerArray()
+        m_base = Marker()
+        m_base.header.frame_id = "map"
+        m_base.ns = "ref_path"
+        m_base.type = Marker.LINE_STRIP
+        m_base.action = Marker.ADD
+        m_base.pose.position.z = 0.0
+        m_base.scale.x = 0.2
+        m_base.color.a = 0.7
+        m_base.color.r = 0.0
+        m_base.color.g = 0.0
+        m_base.color.b = 1.0
+        for i in range(len(ref_path.waypoints) - 1):
+            m = copy.deepcopy(m_base)
+            m.id = i
+            start = Point()
+            start.x = ref_path.waypoints[i].x
+            start.y = ref_path.waypoints[i].y
+            end = Point()
+            end.x = ref_path.waypoints[i + 1].x
+            end.y = ref_path.waypoints[i + 1].y
+            m.points.append(start) # type: ignore
+            m.points.append(end) # type: ignore
+            ref_path_marker_array.markers.append(m) # type: ignore
+        self._ref_path_pub.publish(ref_path_marker_array)
 
     def run(self) -> None:
         SHOW_PLOT_ANIMATION = False
@@ -349,6 +408,8 @@ class MPCController(Node):
 
         # for i in range(10):
         #     self._obstacle_manager.push_next_obstacle()
+
+        self._publish_ref_path_marker(self._car.reference_path)
 
         t_start = self.get_clock().now()
         last_t = t_start
@@ -433,6 +494,11 @@ class MPCController(Node):
             # Log states
             sim_logger.log(self._car, u, t)
             sim_logger.plot_animation(t, loop, lap_times, u, self._mpc, self._car)
+
+
+            # 約 0.25 秒ごとに予測結果を表示
+            if loop % (self._mpc_cfg.control_rate // 4) == 0:
+                self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
 
             # Check if a lap has been completed
             if (next_lap_start and self._car.s >= self._car.reference_path.length or next_lap_start and self._car.s < self._car.reference_path.length / 20.0):
