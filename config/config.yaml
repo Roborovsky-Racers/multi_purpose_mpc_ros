@@ -1,5 +1,5 @@
 sim_logger:
-  animation_enabled: true
+  animation_enabled: false
 
 map:
   # path from pkg share dir
@@ -21,25 +21,25 @@ reference_path:
   # path from pkg share dir
   csv_path: ""
   csv_path: "maps/optimized_traj_mintime.csv"
-  resolution: 0.4
-  smoothing_distance: 5
-  max_width: 6.0
+  resolution: 0.7
+  smoothing_distance: 3
+  max_width: 5.5
   circular: true
 
 bicycle_model:
   length: 1.087
-  width: 1.15
+  width: 1.55
 
 mpc:
-  N: 30
+  N: 15
   Q: [3.0, 100.0, 5.0]  # [v, delta, t]
-  R: [0.0, 100.0]      # [v, delta]
+  R: [0.0, 160.0]      # [v, delta]
   QN: [3.0, 1.5, 5.0]
   v_max: 30.0 # km/h
   a_min: -3.2 # m/s^2
   a_max: 3.2 # m/s^2
   ay_max: 30.0 # m/s^2, maximum lateral acceleration in curves
   delta_max_deg: 80.0 # degrees
-  control_rate: 50.0 # Hz
+  control_rate: 20.0 # Hz
 
 
