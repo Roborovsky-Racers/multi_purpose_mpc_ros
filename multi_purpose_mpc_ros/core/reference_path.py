@@ -125,8 +125,9 @@ class ReferencePath:
 
         if self.circular:
             # insert the first smoothing_distance points to the end of the list
-            wp_x = wp_x + wp_x[:self.smoothing_distance]
-            wp_y = wp_y + wp_y[:self.smoothing_distance]
+            # FIXME: コースを循環させるときに始点と終点にギャップができないように要素を追加している。しかし、 smoothing_distance に応じて追加要素数を調整する必要があり、マジックナンバーが存在している
+            wp_x = wp_x + wp_x[:self.smoothing_distance * 3]
+            wp_y = wp_y + wp_y[:self.smoothing_distance * 3]
 
         # Number of waypoints
         n_wp = [max(1, int(np.sqrt((wp_x[i + 1] - wp_x[i]) ** 2 +
