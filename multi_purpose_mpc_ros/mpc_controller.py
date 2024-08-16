@@ -92,7 +92,7 @@ class MPCConfig:
 class MPCController(Node):
 
     PKG_PATH: str = get_package_share_directory('multi_purpose_mpc_ros') + "/"
-    USE_BUG_ACC = False
+    USE_BUG_ACC = True
     BUG_VEL = 40.0 # km/h
     BUG_ACC = 400.0
 
@@ -483,11 +483,12 @@ class MPCController(Node):
 
 
             self._car.drive(u)
+            sleep_duration = (1.0/self._mpc_cfg.control_rate)/40.
             if self.USE_BUG_ACC:
                 for _ in range(10):
                     tmp_now = self.get_clock().now()
                     self._command_pub.publish(array_to_ackermann_control_command(tmp_now.to_msg(), u, acc)) #ignore
-                    time.sleep((1.0/self._mpc_cfg.control_rate)/30.)
+                    time.sleep(sleep_duration)
             else:
                 self._command_pub.publish(array_to_ackermann_control_command(now.to_msg(), u, acc)) #ignore
 

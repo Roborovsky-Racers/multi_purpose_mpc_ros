@@ -23,7 +23,7 @@ reference_path:
   csv_path: "maps/optimized_traj_mintime.csv"
   resolution: 0.7
   smoothing_distance: 3
-  max_width: 5.5
+  max_width: 5.0
   circular: true
 
 bicycle_model:
@@ -40,6 +40,6 @@ mpc:
   a_max: 3.2 # m/s^2
   ay_max: 30.0 # m/s^2, maximum lateral acceleration in curves
   delta_max_deg: 80.0 # degrees
-  control_rate: 20.0 # Hz
+  control_rate: 25.0 # Hz
 
 
