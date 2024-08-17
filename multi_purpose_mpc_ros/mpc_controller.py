@@ -414,6 +414,7 @@ class MPCController(Node):
         t_start = self.get_clock().now()
         last_t = t_start
         while rclpy.ok() and (not sim_logger.stop_requested()):# and len(lap_times) < MAX_LAPS:
+            self.get_logger().info("loop")
             control_rate.sleep()
 
             if self._cfg.reference_path.update_by_topic and self._trajectory is None: # type: ignore
@@ -483,9 +484,9 @@ class MPCController(Node):
 
 
             self._car.drive(u)
-            sleep_duration = (1.0/self._mpc_cfg.control_rate)/40.
+            sleep_duration = (1.0/self._mpc_cfg.control_rate)/80.
             if self.USE_BUG_ACC:
-                for _ in range(10):
+                for _ in range(15):
                     tmp_now = self.get_clock().now()
                     self._command_pub.publish(array_to_ackermann_control_command(tmp_now.to_msg(), u, acc)) #ignore
                     time.sleep(sleep_duration)
@@ -498,8 +499,8 @@ class MPCController(Node):
 
 
             # 約 0.25 秒ごとに予測結果を表示
-            if loop % (self._mpc_cfg.control_rate // 4) == 0:
-                self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
+            # if loop % (self._mpc_cfg.control_rate // 4) == 0:
+            #     self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
 
             # Check if a lap has been completed
             if (next_lap_start and self._car.s >= self._car.reference_path.length or next_lap_start and self._car.s < self._car.reference_path.length / 20.0):
