@@ -415,6 +415,7 @@ class MPCController(Node):
         last_t = t_start
         while rclpy.ok() and (not sim_logger.stop_requested()):# and len(lap_times) < MAX_LAPS:
             self.get_logger().info("loop")
+            # TODO:ここでbug accのpubをする or 別ノード
             control_rate.sleep()
 
             if self._cfg.reference_path.update_by_topic and self._trajectory is None: # type: ignore
@@ -472,23 +473,43 @@ class MPCController(Node):
                 continue
 
             acc = 0.
+            bug_acc_enabled = False
             if self.USE_BUG_ACC:
-                acc = self.BUG_ACC
+
+                def deg2rad(deg):
+                    return deg * np.pi / 180.0
+
+                if abs(v) > kmh_to_m_per_sec(40.0):
+                    bug_acc_enabled = False
+                    acc = self._mpc_cfg.a_min
+                elif abs(v) > kmh_to_m_per_sec(37.0) or abs(u[1]) > deg2rad(12.0):
+                    bug_acc_enabled = False
+                    acc = self._mpc_cfg.a_max
+                else:
+                    bug_acc_enabled = True
+                    # acc = 400.0
+                    acc = 430.0
             else:
                 acc =  kp * (u[0] - v)
                 # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
                 acc = np.clip(acc, self._mpc_cfg.a_min, self._mpc_cfg.a_max)
-            u[0] = np.clip(last_u[0] + acc * dt, 0.0, self._mpc_cfg.v_max)
+            # u[0] = np.clip(last_u[0] + acc * dt, 0.0, self._mpc_cfg.v_max)
+            u[0] = v
             last_u[0] = u[0]
             last_u[1] = u[1]
 
 
             self._car.drive(u)
-            sleep_duration = (1.0/self._mpc_cfg.control_rate)/80.
-            if self.USE_BUG_ACC:
-                for _ in range(15):
-                    tmp_now = self.get_clock().now()
-                    self._command_pub.publish(array_to_ackermann_control_command(tmp_now.to_msg(), u, acc)) #ignore
+            if self.USE_BUG_ACC and bug_acc_enabled:
+                sleep_duration = (1.0/self._mpc_cfg.control_rate)/80.
+                cmd = array_to_ackermann_control_command(now.to_msg(), u, acc)
+                # for _ in range(1 + (15 if abs(v) < kmh_to_m_per_sec(37.0) else 0) + (10 if abs(v) < kmh_to_m_per_sec(32.0) else 0)):
+                for _ in range(1 + (15 if abs(v) < kmh_to_m_per_sec(39.0) else 0) + (10 if abs(v) < kmh_to_m_per_sec(32.0) else 0)):
+                    now_stamp = self.get_clock().now().to_msg()
+                    cmd.stamp = now_stamp
+                    cmd.lateral.stamp = now_stamp
+                    cmd.longitudinal.stamp = now_stamp
+                    self._command_pub.publish(cmd) #ignore
                     time.sleep(sleep_duration)
             else:
                 self._command_pub.publish(array_to_ackermann_control_command(now.to_msg(), u, acc)) #ignore
@@ -499,8 +520,8 @@ class MPCController(Node):
 
 
             # 約 0.25 秒ごとに予測結果を表示
-            # if loop % (self._mpc_cfg.control_rate // 4) == 0:
-            #     self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
+            if loop % (self._mpc_cfg.control_rate // 4) == 0:
+                self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
 
             # Check if a lap has been completed
             if (next_lap_start and self._car.s >= self._car.reference_path.length or next_lap_start and self._car.s < self._car.reference_path.length / 20.0):
