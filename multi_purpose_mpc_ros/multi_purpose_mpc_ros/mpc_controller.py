@@ -501,10 +501,10 @@ class MPCController(Node):
 
             self._car.drive(u)
             if self.USE_BUG_ACC and bug_acc_enabled:
-                sleep_duration = (1.0/self._mpc_cfg.control_rate)/80.
+                sleep_duration = (1.0/self._mpc_cfg.control_rate)/160.
                 cmd = array_to_ackermann_control_command(now.to_msg(), u, acc)
                 # for _ in range(1 + (15 if abs(v) < kmh_to_m_per_sec(37.0) else 0) + (10 if abs(v) < kmh_to_m_per_sec(32.0) else 0)):
-                for _ in range(1 + (15 if abs(v) < kmh_to_m_per_sec(39.0) else 0) + (10 if abs(v) < kmh_to_m_per_sec(32.0) else 0)):
+                for _ in range(10 + (20 if abs(v) < kmh_to_m_per_sec(39.0) else 0) + (20 if abs(v) < kmh_to_m_per_sec(32.0) else 0)):
                     now_stamp = self.get_clock().now().to_msg()
                     cmd.stamp = now_stamp
                     cmd.lateral.stamp = now_stamp

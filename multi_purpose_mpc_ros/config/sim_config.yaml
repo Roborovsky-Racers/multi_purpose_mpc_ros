@@ -16,6 +16,7 @@ obstacles:
   radius: 1.25
 
 reference_path:
+  update_by_topic: false # When true, 'circle' must be false
   # path from pkg share dir
   csv_path: ""
   resolution: 1.0
