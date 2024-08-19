@@ -20,7 +20,6 @@ def main(argv = sys.argv) -> None:
     try:
         node = MPCController(args.config_path)
         sim = MPCSimulation(node)
-        cProfile.runctx('sim.run()', globals(), locals(), filename='mpc_simulation.prof')
         sim.run()
     except KeyboardInterrupt:
         node.get_logger().info("Shutdown requested")

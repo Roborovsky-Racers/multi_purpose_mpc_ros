@@ -23,11 +23,11 @@ class MPCSimulation:
 
     def run(self):
         SHOW_SIM_ANIMATION = True
-        SHOW_PLOT_ANIMATION = False
-        PLOT_RESULTS = False
+        SHOW_PLOT_ANIMATION = True
+        PLOT_RESULTS = True
         ANIMATION_INTERVAL = 20
         PRINT_INTERVAL = 0
-        MAX_LAPS = 1
+        MAX_LAPS = 6
 
         mpc: MPC = self._controller._mpc
         map: Map = self._controller._map
