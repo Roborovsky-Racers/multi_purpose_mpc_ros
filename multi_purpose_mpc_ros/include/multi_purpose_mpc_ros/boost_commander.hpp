@@ -13,7 +13,7 @@
 namespace roborovsky::multi_purpose_mpc_ros
 {
 
-class CommandPublisher
+class BoostCommander
 {
 public:
     // Alias
@@ -21,7 +21,7 @@ public:
     using AckermannControlBoostCommand = multi_purpose_mpc_ros_msgs::msg::AckermannControlBoostCommand;
 
 public:
-    explicit CommandPublisher(rclcpp::Node::SharedPtr node);
+    explicit BoostCommander(rclcpp::Node::SharedPtr node);
     void run();
 
 private:
@@ -29,6 +29,7 @@ private:
     rclcpp::Publisher<AckermannControlCommand>::SharedPtr command_publisher_;
     rclcpp::Subscription<AckermannControlBoostCommand>::SharedPtr command_subscriber_;
     AckermannControlBoostCommand command_;
+    bool command_received_ = false;
 
     void commandCallback(const AckermannControlBoostCommand::SharedPtr msg);
 

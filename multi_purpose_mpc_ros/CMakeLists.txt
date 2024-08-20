@@ -17,11 +17,11 @@ find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
 ament_auto_add_library(${PROJECT_NAME} SHARED
-  src/command_publisher.cpp
+  src/boost_commander.cpp
 )
 
-ament_auto_add_executable(command_publisher
-  src/command_publisher_node.cpp
+ament_auto_add_executable(boost_commander
+  src/boost_commander_node.cpp
 )
 
 ament_python_install_package(${PROJECT_NAME}

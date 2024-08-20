@@ -28,7 +28,7 @@ reference_path:
 
 bicycle_model:
   length: 1.087
-  width: 1.55
+  width: 1.35
 
 mpc:
   N: 20
