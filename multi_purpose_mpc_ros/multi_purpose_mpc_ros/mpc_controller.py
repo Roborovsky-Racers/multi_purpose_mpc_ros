@@ -36,6 +36,7 @@ from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec, l
 from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
 from multi_purpose_mpc_ros.simulation_logger import SimulationLogger
 from multi_purpose_mpc_ros.obstacle_manager import ObstacleManager
+from multi_purpose_mpc_ros_msgs.msg import AckermannControlBoostCommand
 
 def array_to_ackermann_control_command(stamp, u: np.ndarray, acc: float) -> AckermannControlCommand:
     msg = AckermannControlCommand()
@@ -268,7 +269,7 @@ class MPCController(Node):
     def _setup_pub_sub(self) -> None:
         # Publishers
         self._command_pub = self.create_publisher(
-            AckermannControlCommand, "/control/command/control_cmd", 1)
+            AckermannControlBoostCommand, "/boost_commander/command", 1)
         self._mpc_pred_pub = self.create_publisher(
             MarkerArray, "/mpc/prediction", 1)
         latching_qos = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
@@ -415,7 +416,6 @@ class MPCController(Node):
         last_t = t_start
         while rclpy.ok() and (not sim_logger.stop_requested()):# and len(lap_times) < MAX_LAPS:
             self.get_logger().info("loop")
-            # TODO:ここでbug accのpubをする or 別ノード
             control_rate.sleep()
 
             if self._cfg.reference_path.update_by_topic and self._trajectory is None: # type: ignore
@@ -475,7 +475,6 @@ class MPCController(Node):
             acc = 0.
             bug_acc_enabled = False
             if self.USE_BUG_ACC:
-
                 def deg2rad(deg):
                     return deg * np.pi / 180.0
 
@@ -487,8 +486,7 @@ class MPCController(Node):
                     acc = self._mpc_cfg.a_max
                 else:
                     bug_acc_enabled = True
-                    # acc = 400.0
-                    acc = 430.0
+                    acc = 500.0
             else:
                 acc =  kp * (u[0] - v)
                 # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
@@ -500,19 +498,10 @@ class MPCController(Node):
 
 
             self._car.drive(u)
-            if self.USE_BUG_ACC and bug_acc_enabled:
-                sleep_duration = (1.0/self._mpc_cfg.control_rate)/80.
-                cmd = array_to_ackermann_control_command(now.to_msg(), u, acc)
-                # for _ in range(1 + (15 if abs(v) < kmh_to_m_per_sec(37.0) else 0) + (10 if abs(v) < kmh_to_m_per_sec(32.0) else 0)):
-                for _ in range(1 + (15 if abs(v) < kmh_to_m_per_sec(39.0) else 0) + (10 if abs(v) < kmh_to_m_per_sec(32.0) else 0)):
-                    now_stamp = self.get_clock().now().to_msg()
-                    cmd.stamp = now_stamp
-                    cmd.lateral.stamp = now_stamp
-                    cmd.longitudinal.stamp = now_stamp
-                    self._command_pub.publish(cmd) #ignore
-                    time.sleep(sleep_duration)
-            else:
-                self._command_pub.publish(array_to_ackermann_control_command(now.to_msg(), u, acc)) #ignore
+            cmd = AckermannControlBoostCommand()
+            cmd.command = array_to_ackermann_control_command(now.to_msg(), u, acc)
+            cmd.boost_mode = self.USE_BUG_ACC and bug_acc_enabled
+            self._command_pub.publish(cmd)
 
             # Log states
             sim_logger.log(self._car, u, t)
@@ -520,8 +509,8 @@ class MPCController(Node):
 
 
             # 約 0.25 秒ごとに予測結果を表示
-            if loop % (self._mpc_cfg.control_rate // 4) == 0:
-                self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
+            # if loop % (self._mpc_cfg.control_rate // 4) == 0:
+            #     self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
 
             # Check if a lap has been completed
             if (next_lap_start and self._car.s >= self._car.reference_path.length or next_lap_start and self._car.s < self._car.reference_path.length / 20.0):
