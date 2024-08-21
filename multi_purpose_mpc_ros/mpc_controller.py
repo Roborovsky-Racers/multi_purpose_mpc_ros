@@ -7,16 +7,19 @@ from scipy import sparse
 from scipy.sparse import dia_matrix
 import numpy as np
 import time
+import copy
 
 # ROS 2
 import rclpy
 from rclpy.node import Node
 from ament_index_python.packages import get_package_share_directory
 from rclpy.parameter import Parameter
+from visualization_msgs.msg import Marker, MarkerArray
+from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 
 from std_msgs.msg import Bool, Float64MultiArray
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Quaternion, Pose2D
+from geometry_msgs.msg import Quaternion, Pose2D, Point
 
 # autoware
 from autoware_auto_control_msgs.msg import AckermannControlCommand
@@ -89,7 +92,7 @@ class MPCConfig:
 class MPCController(Node):
 
     PKG_PATH: str = get_package_share_directory('multi_purpose_mpc_ros') + "/"
-    USE_BUG_ACC = False
+    USE_BUG_ACC = True
     BUG_VEL = 40.0 # km/h
     BUG_ACC = 400.0
 
@@ -112,6 +115,8 @@ class MPCController(Node):
     def destroy(self) -> None:
         self._timer.destroy() # type: ignore
         self._command_pub.shutdown() # type: ignore
+        self._mpc_pred_pub.shutdown() # type: ignore
+        self._ref_path_pub.shutdown() # type: ignore
         self._odom_sub.shutdown() # type: ignore
         self._obstacles_sub.shutdown() # type: ignore
         self._group.destroy() # type: ignore
@@ -264,6 +269,11 @@ class MPCController(Node):
         # Publishers
         self._command_pub = self.create_publisher(
             AckermannControlCommand, "/control/command/control_cmd", 1)
+        self._mpc_pred_pub = self.create_publisher(
+            MarkerArray, "/mpc/prediction", 1)
+        latching_qos = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
+        self._ref_path_pub = self.create_publisher(
+            MarkerArray, "/mpc/ref_path", latching_qos)
 
         # Subscribers
         self._odom_sub = self.create_subscription(
@@ -303,7 +313,6 @@ class MPCController(Node):
 
     def _wait_until_odom_received(self, timeout: float = 30.) -> None:
         t_start = self.get_clock().now()
-        self.get_logger().info(f"t_start: {t_start}")
         rate = self.create_rate(30)
         while self._odom is None:
             now = self.get_clock().now()
@@ -319,6 +328,56 @@ class MPCController(Node):
             if (now - t_start).nanoseconds > timeout * 1e9:
                 raise TimeoutError("Timeout while waiting for control mode request message")
             rate.sleep()
+
+    def _publish_mpc_pred_marker(self, x_pred, y_pred):
+        pred_marker_array = MarkerArray()
+        m_base = Marker()
+        m_base.header.frame_id = "map"
+        m_base.ns = "mpc_pred"
+        m_base.type = Marker.SPHERE
+        m_base.action = Marker.ADD
+        m_base.pose.position.z = 0.0
+        m_base.scale.x = 0.3
+        m_base.scale.y = 0.3
+        m_base.scale.z = 0.3
+        m_base.color.a = 1.0
+        m_base.color.r = 0.0
+        m_base.color.g = 1.0
+        m_base.color.b = 0.0
+        for i in range(len(x_pred)):
+            m = copy.deepcopy(m_base)
+            m.id = i
+            m.pose.position.x = x_pred[i]
+            m.pose.position.y = y_pred[i]
+            pred_marker_array.markers.append(m) # type: ignore
+        self._mpc_pred_pub.publish(pred_marker_array)
+
+    def _publish_ref_path_marker(self, ref_path: ReferencePath):
+        ref_path_marker_array = MarkerArray()
+        m_base = Marker()
+        m_base.header.frame_id = "map"
+        m_base.ns = "ref_path"
+        m_base.type = Marker.LINE_STRIP
+        m_base.action = Marker.ADD
+        m_base.pose.position.z = 0.0
+        m_base.scale.x = 0.2
+        m_base.color.a = 0.7
+        m_base.color.r = 0.0
+        m_base.color.g = 0.0
+        m_base.color.b = 1.0
+        for i in range(len(ref_path.waypoints) - 1):
+            m = copy.deepcopy(m_base)
+            m.id = i
+            start = Point()
+            start.x = ref_path.waypoints[i].x
+            start.y = ref_path.waypoints[i].y
+            end = Point()
+            end.x = ref_path.waypoints[i + 1].x
+            end.y = ref_path.waypoints[i + 1].y
+            m.points.append(start) # type: ignore
+            m.points.append(end) # type: ignore
+            ref_path_marker_array.markers.append(m) # type: ignore
+        self._ref_path_pub.publish(ref_path_marker_array)
 
     def run(self) -> None:
         SHOW_PLOT_ANIMATION = False
@@ -350,9 +409,13 @@ class MPCController(Node):
         # for i in range(10):
         #     self._obstacle_manager.push_next_obstacle()
 
+        self._publish_ref_path_marker(self._car.reference_path)
+
         t_start = self.get_clock().now()
         last_t = t_start
         while rclpy.ok() and (not sim_logger.stop_requested()):# and len(lap_times) < MAX_LAPS:
+            self.get_logger().info("loop")
+            # TODO:ここでbug accのpubをする or 別ノード
             control_rate.sleep()
 
             if self._cfg.reference_path.update_by_topic and self._trajectory is None: # type: ignore
@@ -410,29 +473,55 @@ class MPCController(Node):
                 continue
 
             acc = 0.
+            bug_acc_enabled = False
             if self.USE_BUG_ACC:
-                acc = self.BUG_ACC
+
+                def deg2rad(deg):
+                    return deg * np.pi / 180.0
+
+                if abs(v) > kmh_to_m_per_sec(40.0):
+                    bug_acc_enabled = False
+                    acc = self._mpc_cfg.a_min
+                elif abs(v) > kmh_to_m_per_sec(37.0) or abs(u[1]) > deg2rad(12.0):
+                    bug_acc_enabled = False
+                    acc = self._mpc_cfg.a_max
+                else:
+                    bug_acc_enabled = True
+                    # acc = 400.0
+                    acc = 430.0
             else:
                 acc =  kp * (u[0] - v)
                 # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
                 acc = np.clip(acc, self._mpc_cfg.a_min, self._mpc_cfg.a_max)
-            u[0] = np.clip(last_u[0] + acc * dt, 0.0, self._mpc_cfg.v_max)
+            # u[0] = np.clip(last_u[0] + acc * dt, 0.0, self._mpc_cfg.v_max)
+            u[0] = v
             last_u[0] = u[0]
             last_u[1] = u[1]
 
 
             self._car.drive(u)
-            if self.USE_BUG_ACC:
-                for _ in range(10):
-                    tmp_now = self.get_clock().now()
-                    self._command_pub.publish(array_to_ackermann_control_command(tmp_now.to_msg(), u, acc)) #ignore
-                    time.sleep((1.0/self._mpc_cfg.control_rate)/30.)
+            if self.USE_BUG_ACC and bug_acc_enabled:
+                sleep_duration = (1.0/self._mpc_cfg.control_rate)/80.
+                cmd = array_to_ackermann_control_command(now.to_msg(), u, acc)
+                # for _ in range(1 + (15 if abs(v) < kmh_to_m_per_sec(37.0) else 0) + (10 if abs(v) < kmh_to_m_per_sec(32.0) else 0)):
+                for _ in range(1 + (15 if abs(v) < kmh_to_m_per_sec(39.0) else 0) + (10 if abs(v) < kmh_to_m_per_sec(32.0) else 0)):
+                    now_stamp = self.get_clock().now().to_msg()
+                    cmd.stamp = now_stamp
+                    cmd.lateral.stamp = now_stamp
+                    cmd.longitudinal.stamp = now_stamp
+                    self._command_pub.publish(cmd) #ignore
+                    time.sleep(sleep_duration)
             else:
                 self._command_pub.publish(array_to_ackermann_control_command(now.to_msg(), u, acc)) #ignore
 
             # Log states
             sim_logger.log(self._car, u, t)
             sim_logger.plot_animation(t, loop, lap_times, u, self._mpc, self._car)
+
+
+            # 約 0.25 秒ごとに予測結果を表示
+            if loop % (self._mpc_cfg.control_rate // 4) == 0:
+                self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
 
             # Check if a lap has been completed
             if (next_lap_start and self._car.s >= self._car.reference_path.length or next_lap_start and self._car.s < self._car.reference_path.length / 20.0):
