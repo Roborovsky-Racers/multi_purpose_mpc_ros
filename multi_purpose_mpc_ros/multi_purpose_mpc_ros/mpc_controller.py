@@ -478,15 +478,16 @@ class MPCController(Node):
                 def deg2rad(deg):
                     return deg * np.pi / 180.0
 
-                if abs(v) > kmh_to_m_per_sec(40.0):
+                if abs(v) > kmh_to_m_per_sec(41.0) or \
+                 (abs(v) > kmh_to_m_per_sec(38.0) and abs(u[1]) > deg2rad(11.0)):
                     bug_acc_enabled = False
-                    acc = self._mpc_cfg.a_min
-                elif abs(v) > kmh_to_m_per_sec(37.0) or abs(u[1]) > deg2rad(12.0):
+                    acc = self._mpc_cfg.a_min / 2.0
+                elif abs(v) > kmh_to_m_per_sec(38.0) or abs(u[1]) > deg2rad(11.0):
                     bug_acc_enabled = False
                     acc = self._mpc_cfg.a_max
                 else:
                     bug_acc_enabled = True
-                    acc = 500.0
+                    acc = 470.0
             else:
                 acc =  kp * (u[0] - v)
                 # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
@@ -510,7 +511,7 @@ class MPCController(Node):
 
             # 約 0.25 秒ごとに予測結果を表示
             # if loop % (self._mpc_cfg.control_rate // 4) == 0:
-            #     self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
+            self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
 
             # Check if a lap has been completed
             if (next_lap_start and self._car.s >= self._car.reference_path.length or next_lap_start and self._car.s < self._car.reference_path.length / 20.0):
