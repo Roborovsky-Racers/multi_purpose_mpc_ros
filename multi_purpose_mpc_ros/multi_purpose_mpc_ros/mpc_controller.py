@@ -270,11 +270,19 @@ class MPCController(Node):
         # Publishers
         self._command_pub = self.create_publisher(
             AckermannControlBoostCommand, "/boost_commander/command", 1)
+
+        # NOTE:評価環境での可視化のためにダミーのトピック名を使用
+        # self._mpc_pred_pub = self.create_publisher(
+        #     MarkerArray, "/mpc/prediction", 1)
         self._mpc_pred_pub = self.create_publisher(
-            MarkerArray, "/mpc/prediction", 1)
+            MarkerArray, "/localization/pose_estimator/monte_carlo_initial_pose_marker", 1)
+
         latching_qos = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
+        # NOTE:評価環境での可視化のためにダミーのトピック名を使用
+        # self._ref_path_pub = self.create_publisher(
+        #     MarkerArray, "/mpc/ref_path", latching_qos)
         self._ref_path_pub = self.create_publisher(
-            MarkerArray, "/mpc/ref_path", latching_qos)
+            MarkerArray, "/planning/scenario_planning/lane_driving/behavior_planning/behavior_path_planner/debug/bound", latching_qos)
 
         # Subscribers
         self._odom_sub = self.create_subscription(
