@@ -495,7 +495,7 @@ class MPCController(Node):
                     acc = self._mpc_cfg.a_max
                 else:
                     bug_acc_enabled = True
-                    acc = 450.0
+                    acc = 480.0
             else:
                 acc =  kp * (u[0] - v)
                 # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
