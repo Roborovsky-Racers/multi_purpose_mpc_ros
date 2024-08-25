@@ -1,3 +1,4 @@
+from typing import List
 import numpy as np
 import numpy.ma as ma
 import math
@@ -121,6 +122,12 @@ class ReferencePath:
         :param wp_y: y coordinates of waypoints in global coordinates
         :return: list of waypoint objects
         """
+
+        if self.circular:
+            # insert the first smoothing_distance points to the end of the list
+            # FIXME: コースを循環させるときに始点と終点にギャップができないように要素を追加している。しかし、 smoothing_distance に応じて追加要素数を調整する必要があり、マジックナンバーが存在している
+            wp_x = wp_x + wp_x[:self.smoothing_distance * 3]
+            wp_y = wp_y + wp_y[:self.smoothing_distance * 3]
 
         # Number of waypoints
         n_wp = [max(1, int(np.sqrt((wp_x[i + 1] - wp_x[i]) ** 2 +
@@ -631,30 +638,33 @@ class ReferencePath:
         # Assume occupied path
         free_cells = False
 
+        # cache to avoid multiple access to self.map.data
+        map_data = self.map.data
+
         # Iterate over path from left border to right border
         for x, y in zip(x_list[1:], y_list[1:]):
+            cell_value = map_data[y, x]
             # If cell is free, update lower bound
-            if self.map.data[y, x] == 1:
+            if cell_value == 1:
                 # Free cell detected
                 free_cells = True
                 lb_o = (x, y)
             # If cell is occupied or end of path, end segment. Add segment
             # to list of candidates. Then, reset upper and lower bound to
             # current cell.
-            if (self.map.data[y, x] == 0 or (x, y) == lb_p) and free_cells:
+            if (cell_value == 0 or (x, y) == lb_p) and free_cells:
                 # Set lower bound to border cell of segment
                 lb_o = (x, y)
                 # Transform upper and lower bound cells to world coordinates
                 ub_o = self.map.m2w(ub_o[0], ub_o[1])
                 lb_o = self.map.m2w(lb_o[0], lb_o[1])
                 # If segment larger than threshold, add to candidates
-                if np.sqrt((ub_o[0]-lb_o[0])**2 + (ub_o[1]-lb_o[1])**2) > \
-                    min_width:
+                if ((ub_o[0]-lb_o[0])**2 + (ub_o[1]-lb_o[1])**2) > min_width**2:
                     free_segments.append((ub_o, lb_o))
                 # Start new segment
                 ub_o = (x, y)
                 free_cells = False
-            elif self.map.data[y, x] == 0 and not free_cells:
+            elif cell_value == 0 and not free_cells:
                 ub_o = (x, y)
                 lb_o = (x, y)
 
@@ -787,7 +797,6 @@ class ReferencePath:
             wp.dynamic_border_cells = bound_cells_sm
 
         return np.array(ub_hor), np.array(lb_hor), border_cells_hor_sm
-
 
 if __name__ == '__main__':
 

@@ -6,16 +6,20 @@ import dataclasses
 from scipy import sparse
 from scipy.sparse import dia_matrix
 import numpy as np
+import time
+import copy
 
 # ROS 2
 import rclpy
 from rclpy.node import Node
 from ament_index_python.packages import get_package_share_directory
 from rclpy.parameter import Parameter
+from visualization_msgs.msg import Marker, MarkerArray
+from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 
 from std_msgs.msg import Bool, Float32MultiArray, Float64MultiArray
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Quaternion, Pose2D
+from geometry_msgs.msg import Quaternion, Pose2D, Point
 
 # autoware
 from autoware_auto_control_msgs.msg import AckermannControlCommand
@@ -26,12 +30,13 @@ from multi_purpose_mpc_ros.core.map import Map, Obstacle
 from multi_purpose_mpc_ros.core.reference_path import ReferencePath
 from multi_purpose_mpc_ros.core.spatial_bicycle_models import BicycleModel
 from multi_purpose_mpc_ros.core.MPC import MPC
-from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec
+from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec, load_ref_path
 
 # Project
 from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
 from multi_purpose_mpc_ros.simulation_logger import SimulationLogger
 from multi_purpose_mpc_ros.obstacle_manager import ObstacleManager
+from multi_purpose_mpc_ros_msgs.msg import AckermannControlBoostCommand
 
 def array_to_ackermann_control_command(stamp, u: np.ndarray, acc: float) -> AckermannControlCommand:
     msg = AckermannControlCommand()
@@ -88,13 +93,17 @@ class MPCConfig:
 class MPCController(Node):
 
     PKG_PATH: str = get_package_share_directory('multi_purpose_mpc_ros') + "/"
+    MAX_LAPS = 6
+    USE_BUG_ACC = True
+    BUG_VEL = 40.0 # km/h
+    BUG_ACC = 400.0
 
     def __init__(self, config_path: str) -> None:
         super().__init__("mpc_controller") # type: ignore
 
         self._cfg = self._load_config(config_path)
         self._odom: Optional[Odometry] = None
-        self._enable_control = False
+        self._enable_control = None
         self._initialize()
         self._setup_pub_sub()
 
@@ -102,12 +111,11 @@ class MPCController(Node):
         param = Parameter("use_sim_time", Parameter.Type.BOOL, True)
         self.set_parameters([param])
 
-        # wait for clock received
-        rclpy.spin_once(self, timeout_sec=1)
-
     def destroy(self) -> None:
         self._timer.destroy() # type: ignore
         self._command_pub.shutdown() # type: ignore
+        self._mpc_pred_pub.shutdown() # type: ignore
+        self._ref_path_pub.shutdown() # type: ignore
         self._odom_sub.shutdown() # type: ignore
         self._obstacles_sub.shutdown() # type: ignore
         self._group.destroy() # type: ignore
@@ -155,17 +163,34 @@ class MPCController(Node):
             return Map(self.in_pkg_share(self._cfg.map.yaml_path)) # type: ignore
 
         def create_ref_path(map: Map) -> ReferencePath:
-            wp_x, wp_y = load_waypoints(self.in_pkg_share(self._cfg.waypoints.csv_path)) # type: ignore
-
             cfg_ref_path = self._cfg.reference_path # type: ignore
-            return ReferencePath(
-                map,
-                wp_x,
-                wp_y,
-                cfg_ref_path.resolution,
-                cfg_ref_path.smoothing_distance,
-                cfg_ref_path.max_width,
-                cfg_ref_path.circular)
+
+            is_ref_path_given = cfg_ref_path.csv_path != "" # type: ignore
+            if is_ref_path_given:
+                print("Using given reference path")
+                wp_x, wp_y, _, _ = load_ref_path(self.in_pkg_share(self._cfg.reference_path.csv_path)) # type: ignore
+                return ReferencePath(
+                    map,
+                    wp_x,
+                    wp_y,
+                    cfg_ref_path.resolution,
+                    cfg_ref_path.smoothing_distance,
+                    cfg_ref_path.max_width,
+                    cfg_ref_path.circular)
+
+            else:
+                print("Using waypoints to create reference path")
+                wp_x, wp_y = load_waypoints(self.in_pkg_share(self._cfg.waypoints.csv_path)) # type: ignore
+
+                return ReferencePath(
+                    map,
+                    wp_x,
+                    wp_y,
+                    cfg_ref_path.resolution,
+                    cfg_ref_path.smoothing_distance,
+                    cfg_ref_path.max_width,
+                    cfg_ref_path.circular)
+
 
         def create_obstacles() -> List[Obstacle]:
             use_csv_obstacles = self._cfg.obstacles.csv_path != "" # type: ignore
@@ -175,7 +200,7 @@ class MPCController(Node):
                 obstacles = []
                 for cx, cy in zip(obs_x, obs_y):
                     obstacles.append(Obstacle(cx=cx, cy=cy, radius=self._cfg.obstacles.radius)) # type: ignore
-                self._obstacle_manager = ObstacleManager(map, obstacles)
+                self._obstacle_manager = ObstacleManager(self._map, obstacles)
                 return obstacles
             else:
                 return []
@@ -195,7 +220,7 @@ class MPCController(Node):
                 sparse.diags(cfg_mpc.Q),
                 sparse.diags(cfg_mpc.R),
                 sparse.diags(cfg_mpc.QN),
-                kmh_to_m_per_sec(cfg_mpc.v_max),
+                kmh_to_m_per_sec(self.BUG_VEL if self.USE_BUG_ACC else cfg_mpc.v_max),
                 cfg_mpc.a_min,
                 cfg_mpc.a_max,
                 cfg_mpc.ay_max,
@@ -232,20 +257,35 @@ class MPCController(Node):
         self._mpc_cfg, self._mpc = create_mpc(self._car)
         compute_speed_profile(self._car, self._mpc_cfg)
 
+        self._trajectory: Optional[Trajectory] = None
+
         # Obstacles
         self._use_obstacles_topic = self._obstacles == []
         self._obstacles_updated = False
         self._last_obstacles_msgs_raw = None
 
         # Laps
-        self._last_laps = None
+        self._current_laps = None
         self._last_lap_time = 0.0
-        self._lap_times = [0.0] * 6
+        self._lap_times = [None] * (self.MAX_LAPS + 1) # +1 means include lap 0
 
     def _setup_pub_sub(self) -> None:
         # Publishers
         self._command_pub = self.create_publisher(
-            AckermannControlCommand, "/control/command/control_cmd", 1)
+            AckermannControlBoostCommand, "/boost_commander/command", 1)
+
+        # NOTE:評価環境での可視化のためにダミーのトピック名を使用
+        # self._mpc_pred_pub = self.create_publisher(
+        #     MarkerArray, "/mpc/prediction", 1)
+        self._mpc_pred_pub = self.create_publisher(
+            MarkerArray, "/localization/pose_estimator/monte_carlo_initial_pose_marker", 1)
+
+        latching_qos = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
+        # NOTE:評価環境での可視化のためにダミーのトピック名を使用
+        # self._ref_path_pub = self.create_publisher(
+        #     MarkerArray, "/mpc/ref_path", latching_qos)
+        self._ref_path_pub = self.create_publisher(
+            MarkerArray, "/planning/scenario_planning/lane_driving/behavior_planning/behavior_path_planner/debug/bound", latching_qos)
 
         # Subscribers
         self._odom_sub = self.create_subscription(
@@ -290,42 +330,105 @@ class MPCController(Node):
         lap_time = msg.data[2]
         # section = int(msg.data[3])
 
-        if self._last_laps is None:
-            self._last_laps = 1 if laps == 0 else laps
+        if self._current_laps is None:
+            self._current_laps = 1 if laps == 0 else laps
 
-        if laps > self._last_laps:
-            self.get_logger().info(f'Lap {self._last_laps} completed! Lap time: {self._last_lap_time} s')
-            self._lap_times[self._last_laps-1] = self._last_lap_time
-            self._last_laps = laps
+        if laps > self._current_laps:
+            self.get_logger().info(f'Lap {self._current_laps} completed! Lap time: {self._last_lap_time} s')
+            self._lap_times[self._current_laps] = self._last_lap_time
+            self._current_laps = laps
 
         self._last_lap_time = lap_time
 
-    def _wait_until_odom_received(self, timeout: float = 30.) -> None:
+    def _wait_until_clock_received(self) -> None:
+        rate = self.create_rate(10)
+        rate.sleep()
+
+    def _wait_until_message_received(self, message_getter, message_name: str, timeout: float, rate_hz: int = 30) -> None:
         t_start = self.get_clock().now()
-        self.get_logger().info(f"t_start: {t_start}")
-        rate = self.create_rate(30)
-        while self._odom is None:
+        rate = self.create_rate(rate_hz)
+        while message_getter() is None:
             now = self.get_clock().now()
             if (now - t_start).nanoseconds > timeout * 1e9:
-                raise TimeoutError("Timeout while waiting for odometry message")
+                self.get_logger().info(f"now: {now}, t_start: {t_start}")
+                raise TimeoutError(f"Timeout while waiting for {message_name} message")
             rate.sleep()
 
+    def _wait_until_odom_received(self, timeout: float = 30.) -> None:
+        self._wait_until_message_received(lambda: self._odom, 'odometry', timeout)
+
     def _wait_until_control_mode_request_received(self, timeout: float = 240.) -> None:
-        t_start = self.get_clock().now()
-        rate = self.create_rate(30)
-        while not self._enable_control:
-            now = self.get_clock().now()
-            if (now - t_start).nanoseconds > timeout * 1e9:
-                raise TimeoutError("Timeout while waiting for control mode request message")
-            rate.sleep()
+        self._wait_until_message_received(lambda: self._enable_control, 'control mode request', timeout)
+
+    def _wait_until_trajectory_received(self, timeout: float = 30.) -> None:
+        if self._cfg.reference_path.update_by_topic:
+            return
+        self._wait_until_message_received(lambda: self._trajectory, 'trajectory', timeout)
+
+    def _wait_until_aw_sim_status_received(self, timeout: float = 30.) -> None:
+        self._wait_until_message_received(lambda: self._current_laps, 'AWSIM status', timeout)
+
+    def _publish_mpc_pred_marker(self, x_pred, y_pred):
+        pred_marker_array = MarkerArray()
+        m_base = Marker()
+        m_base.header.frame_id = "map"
+        m_base.ns = "mpc_pred"
+        m_base.type = Marker.SPHERE
+        m_base.action = Marker.ADD
+        m_base.pose.position.z = 0.0
+        m_base.scale.x = 0.3
+        m_base.scale.y = 0.3
+        m_base.scale.z = 0.3
+        m_base.color.a = 1.0
+        m_base.color.r = 0.0
+        m_base.color.g = 1.0
+        m_base.color.b = 0.0
+        for i in range(len(x_pred)):
+            m = copy.deepcopy(m_base)
+            m.id = i
+            m.pose.position.x = x_pred[i]
+            m.pose.position.y = y_pred[i]
+            pred_marker_array.markers.append(m) # type: ignore
+        self._mpc_pred_pub.publish(pred_marker_array)
+
+    def _publish_ref_path_marker(self, ref_path: ReferencePath):
+        ref_path_marker_array = MarkerArray()
+        m_base = Marker()
+        m_base.header.frame_id = "map"
+        m_base.ns = "ref_path"
+        m_base.type = Marker.LINE_STRIP
+        m_base.action = Marker.ADD
+        m_base.pose.position.z = 0.0
+        m_base.scale.x = 0.2
+        m_base.color.a = 0.7
+        m_base.color.r = 0.0
+        m_base.color.g = 0.0
+        m_base.color.b = 1.0
+        for i in range(len(ref_path.waypoints) - 1):
+            m = copy.deepcopy(m_base)
+            m.id = i
+            start = Point()
+            start.x = ref_path.waypoints[i].x
+            start.y = ref_path.waypoints[i].y
+            end = Point()
+            end.x = ref_path.waypoints[i + 1].x
+            end.y = ref_path.waypoints[i + 1].y
+            m.points.append(start) # type: ignore
+            m.points.append(end) # type: ignore
+            ref_path_marker_array.markers.append(m) # type: ignore
+        self._ref_path_pub.publish(ref_path_marker_array)
 
     def run(self) -> None:
         SHOW_PLOT_ANIMATION = False
         PLOT_RESULTS = False
         ANIMATION_INTERVAL = 20
 
+        self._wait_until_clock_received()
         self._wait_until_odom_received()
         self._wait_until_control_mode_request_received()
+        self._wait_until_trajectory_received()
+        self._wait_until_aw_sim_status_received()
+
         control_rate = self.create_rate(self._mpc_cfg.control_rate)
 
         pose = odom_to_pose_2d(self._odom) # type: ignore
@@ -335,7 +438,7 @@ class MPCController(Node):
 
         sim_logger = SimulationLogger(
             self.get_logger(),
-            self._car.temporal_state.x, self._car.temporal_state.y, self._cfg.sim_logger.animation_enabled, SHOW_PLOT_ANIMATION, PLOT_RESULTS, ANIMATION_INTERVAL)
+            self._car.temporal_state.x, self._car.temporal_state.y, self._cfg.sim_logger.animation_enabled, SHOW_PLOT_ANIMATION, PLOT_RESULTS, ANIMATION_INTERVAL) # type: ignore
 
         self.get_logger().info(f"START!")
 
@@ -346,13 +449,13 @@ class MPCController(Node):
         # for i in range(10):
         #     self._obstacle_manager.push_next_obstacle()
 
+        self._publish_ref_path_marker(self._car.reference_path)
+
         t_start = self.get_clock().now()
         last_t = t_start
-        while rclpy.ok() and (not sim_logger.stop_requested()):# and len(lap_times) < MAX_LAPS:
+        while rclpy.ok() and (not sim_logger.stop_requested()) and self._current_laps <= self.MAX_LAPS:
+            # self.get_logger().info("loop")
             control_rate.sleep()
-
-            if self._trajectory is None:
-                continue
 
             if loop % 100 == 0:
                 # update obstacles
@@ -362,10 +465,11 @@ class MPCController(Node):
                     self._obstacles_updated = True
 
                 # update reference path
-                new_referece_path = self._create_reference_path_from_autoware_trajectory(self._trajectory)
-                if new_referece_path is not None:
-                    self._car.reference_path = new_referece_path
-                    self._car.update_reference_path(self._car.reference_path)
+                if self._cfg.reference_path.update_by_topic: # type: ignore
+                    new_referece_path = self._create_reference_path_from_autoware_trajectory(self._trajectory)
+                    if new_referece_path is not None:
+                        self._car.reference_path = new_referece_path
+                        self._car.update_reference_path(self._car.reference_path)
 
                 def plot_reference_path(car):
                     import matplotlib.pyplot as plt
@@ -403,23 +507,49 @@ class MPCController(Node):
                 self.get_logger().error("No control signal", throttle_duration_sec=1)
                 continue
 
-            acc =  kp * (u[0] - v)
-            # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
-            acc = np.clip(acc, self._mpc_cfg.a_min, self._mpc_cfg.a_max)
-            # print(acc)
-            u[0] = np.clip(last_u[0] + acc * dt, 0.0, self._mpc_cfg.v_max)
+            acc = 0.
+            bug_acc_enabled = False
+            if self.USE_BUG_ACC:
+                def deg2rad(deg):
+                    return deg * np.pi / 180.0
+
+                if abs(v) > kmh_to_m_per_sec(41.0) or \
+                 (abs(v) > kmh_to_m_per_sec(38.0) and abs(u[1]) > deg2rad(10.0)):
+                    bug_acc_enabled = False
+                    acc = self._mpc_cfg.a_min / 2.0
+                elif abs(v) > kmh_to_m_per_sec(38.0) or abs(u[1]) > deg2rad(10.0):
+                    bug_acc_enabled = False
+                    acc = self._mpc_cfg.a_max
+                else:
+                    bug_acc_enabled = True
+                    acc = 480.0
+            else:
+                acc =  kp * (u[0] - v)
+                # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
+                acc = np.clip(acc, self._mpc_cfg.a_min, self._mpc_cfg.a_max)
+            # u[0] = np.clip(last_u[0] + acc * dt, 0.0, self._mpc_cfg.v_max)
+            u[0] = v
             last_u[0] = u[0]
             last_u[1] = u[1]
 
+
             self._car.drive(u)
-            self._command_pub.publish(array_to_ackermann_control_command(now.to_msg(), u, acc)) #ignore
+            cmd = AckermannControlBoostCommand()
+            cmd.command = array_to_ackermann_control_command(now.to_msg(), u, acc)
+            cmd.boost_mode = self.USE_BUG_ACC and bug_acc_enabled
+            self._command_pub.publish(cmd)
 
             # Log states
             sim_logger.log(self._car, u, t)
-            sim_logger.plot_animation(t, loop, self._last_laps, self._lap_times, u, self._mpc, self._car)
+            sim_logger.plot_animation(t, loop, self._current_laps, self._lap_times, u, self._mpc, self._car)
+
+
+            # 約 0.25 秒ごとに予測結果を表示
+            # if loop % (self._mpc_cfg.control_rate // 4) == 0:
+            self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
 
         # show results
-        sim_logger.show_results(self._last_laps, self._lap_times, self._car)
+        sim_logger.show_results(self._current_laps, self._lap_times, self._car)
 
     @classmethod
     def in_pkg_share(cls, file_path: str) -> str:

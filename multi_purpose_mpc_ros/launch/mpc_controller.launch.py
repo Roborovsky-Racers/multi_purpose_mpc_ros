@@ -20,7 +20,7 @@ def launch_setup(context, *args, **kwargs):
         / "config.yaml"
     )
 
-    mpc_simulation = Node(
+    mpc_controller = Node(
         package="multi_purpose_mpc_ros",
         executable="run_mpc_controller.bash",
         name="mpc_controller",
@@ -36,8 +36,23 @@ def launch_setup(context, *args, **kwargs):
         parameters=[use_sim_time]
     )
 
+    boost_commander = Node(
+        package="multi_purpose_mpc_ros",
+        executable="boost_commander",
+        name="boost_commander",
+        output="both",
+        emulate_tty=True,  # https://github.com/ros2/launch/issues/188
+        arguments=[
+            "--ros-args",
+            "--log-level",
+            "info",
+        ],
+        parameters=[use_sim_time]
+    )
+
     return [
-        mpc_simulation,
+        mpc_controller,
+        boost_commander
     ]
 
 
