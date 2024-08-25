@@ -17,7 +17,7 @@ from rclpy.parameter import Parameter
 from visualization_msgs.msg import Marker, MarkerArray
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 
-from std_msgs.msg import Bool, Float64MultiArray
+from std_msgs.msg import Bool, Float32MultiArray, Float64MultiArray
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Quaternion, Pose2D, Point
 
@@ -93,6 +93,7 @@ class MPCConfig:
 class MPCController(Node):
 
     PKG_PATH: str = get_package_share_directory('multi_purpose_mpc_ros') + "/"
+    MAX_LAPS = 6
     USE_BUG_ACC = True
     BUG_VEL = 40.0 # km/h
     BUG_ACC = 400.0
@@ -102,16 +103,13 @@ class MPCController(Node):
 
         self._cfg = self._load_config(config_path)
         self._odom: Optional[Odometry] = None
-        self._enable_control = False
+        self._enable_control = None
         self._initialize()
         self._setup_pub_sub()
 
         # set use_sim_time parameter
         param = Parameter("use_sim_time", Parameter.Type.BOOL, True)
         self.set_parameters([param])
-
-        # wait for clock received
-        rclpy.spin_once(self, timeout_sec=1)
 
     def destroy(self) -> None:
         self._timer.destroy() # type: ignore
@@ -266,6 +264,11 @@ class MPCController(Node):
         self._obstacles_updated = False
         self._last_obstacles_msgs_raw = None
 
+        # Laps
+        self._current_laps = None
+        self._last_lap_time = 0.0
+        self._lap_times = [None] * (self.MAX_LAPS + 1) # +1 means include lap 0
+
     def _setup_pub_sub(self) -> None:
         # Publishers
         self._command_pub = self.create_publisher(
@@ -293,6 +296,8 @@ class MPCController(Node):
             Bool, "control/control_mode_request_topic", self._control_mode_request_callback, 1)
         self._trajectory_sub = self.create_subscription(
             Trajectory, "planning/scenario_planning/trajectory", self._trajectory_callback, 1)
+        self._awsim_status_sub = self.create_subscription(
+            Float32MultiArray, "/aichallenge/awsim/status", self._awsim_status_callback, 1)
 
     def _odom_callback(self, msg: Odometry) -> None:
         self._odom = msg
@@ -320,23 +325,48 @@ class MPCController(Node):
     def _trajectory_callback(self, msg):
         self._trajectory = msg
 
-    def _wait_until_odom_received(self, timeout: float = 30.) -> None:
+    def _awsim_status_callback(self, msg):
+        laps = int(msg.data[1])
+        lap_time = msg.data[2]
+        # section = int(msg.data[3])
+
+        if self._current_laps is None:
+            self._current_laps = 1 if laps == 0 else laps
+
+        if laps > self._current_laps:
+            self.get_logger().info(f'Lap {self._current_laps} completed! Lap time: {self._last_lap_time} s')
+            self._lap_times[self._current_laps] = self._last_lap_time
+            self._current_laps = laps
+
+        self._last_lap_time = lap_time
+
+    def _wait_until_clock_received(self) -> None:
+        rate = self.create_rate(10)
+        rate.sleep()
+
+    def _wait_until_message_received(self, message_getter, message_name: str, timeout: float, rate_hz: int = 30) -> None:
         t_start = self.get_clock().now()
-        rate = self.create_rate(30)
-        while self._odom is None:
+        rate = self.create_rate(rate_hz)
+        while message_getter() is None:
             now = self.get_clock().now()
             if (now - t_start).nanoseconds > timeout * 1e9:
-                raise TimeoutError("Timeout while waiting for odometry message")
+                self.get_logger().info(f"now: {now}, t_start: {t_start}")
+                raise TimeoutError(f"Timeout while waiting for {message_name} message")
             rate.sleep()
 
+    def _wait_until_odom_received(self, timeout: float = 30.) -> None:
+        self._wait_until_message_received(lambda: self._odom, 'odometry', timeout)
+
     def _wait_until_control_mode_request_received(self, timeout: float = 240.) -> None:
-        t_start = self.get_clock().now()
-        rate = self.create_rate(30)
-        while not self._enable_control:
-            now = self.get_clock().now()
-            if (now - t_start).nanoseconds > timeout * 1e9:
-                raise TimeoutError("Timeout while waiting for control mode request message")
-            rate.sleep()
+        self._wait_until_message_received(lambda: self._enable_control, 'control mode request', timeout)
+
+    def _wait_until_trajectory_received(self, timeout: float = 30.) -> None:
+        if self._cfg.reference_path.update_by_topic:
+            return
+        self._wait_until_message_received(lambda: self._trajectory, 'trajectory', timeout)
+
+    def _wait_until_aw_sim_status_received(self, timeout: float = 30.) -> None:
+        self._wait_until_message_received(lambda: self._current_laps, 'AWSIM status', timeout)
 
     def _publish_mpc_pred_marker(self, x_pred, y_pred):
         pred_marker_array = MarkerArray()
@@ -393,8 +423,12 @@ class MPCController(Node):
         PLOT_RESULTS = False
         ANIMATION_INTERVAL = 20
 
+        self._wait_until_clock_received()
         self._wait_until_odom_received()
         self._wait_until_control_mode_request_received()
+        self._wait_until_trajectory_received()
+        self._wait_until_aw_sim_status_received()
+
         control_rate = self.create_rate(self._mpc_cfg.control_rate)
 
         pose = odom_to_pose_2d(self._odom) # type: ignore
@@ -409,9 +443,6 @@ class MPCController(Node):
         self.get_logger().info(f"START!")
 
         loop = 0
-        lap_times = []
-        next_lap_start = False
-
         kp = 100.0
         last_u = np.array([0.0, 0.0])
 
@@ -422,12 +453,9 @@ class MPCController(Node):
 
         t_start = self.get_clock().now()
         last_t = t_start
-        while rclpy.ok() and (not sim_logger.stop_requested()):# and len(lap_times) < MAX_LAPS:
-            self.get_logger().info("loop")
+        while rclpy.ok() and (not sim_logger.stop_requested()) and self._current_laps <= self.MAX_LAPS:
+            # self.get_logger().info("loop")
             control_rate.sleep()
-
-            if self._cfg.reference_path.update_by_topic and self._trajectory is None: # type: ignore
-                continue
 
             if loop % 100 == 0:
                 # update obstacles
@@ -464,7 +492,6 @@ class MPCController(Node):
                 # self.get_logger().info("Obstacles updated")
                 self._map.reset_map()
                 self._map.add_obstacles(self._obstacles)
-
 
             pose = odom_to_pose_2d(self._odom) # type: ignore
             v = self._odom.twist.twist.linear.x
@@ -514,33 +541,15 @@ class MPCController(Node):
 
             # Log states
             sim_logger.log(self._car, u, t)
-            sim_logger.plot_animation(t, loop, lap_times, u, self._mpc, self._car)
+            sim_logger.plot_animation(t, loop, self._current_laps, self._lap_times, u, self._mpc, self._car)
 
 
             # 約 0.25 秒ごとに予測結果を表示
             # if loop % (self._mpc_cfg.control_rate // 4) == 0:
             self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
 
-            # Check if a lap has been completed
-            if (next_lap_start and self._car.s >= self._car.reference_path.length or next_lap_start and self._car.s < self._car.reference_path.length / 20.0):
-                if len(lap_times) > 0:
-                    lap_time = t - sum(lap_times)
-                else:
-                    lap_time = t
-                lap_times.append(lap_time)
-                next_lap_start = False
-
-                # self.get_logger().info(f'Lap {len(lap_times)} completed! Lap time: {lap_time} s')
-
-            # LAPインクリメント直後にゴール付近WPを最近傍WPとして認識してしまうと、 s>=lengthとなり
-            # 次の周回がすぐに終了したと判定されてしまう場合があるため、
-            # 誤判定防止のために少しだけ余計に走行した後に次の周回が開始したと判定する
-            if not next_lap_start and (self._car.reference_path.length / 10.0 < self._car.s and self._car.s < self._car.reference_path.length / 10.0 * 2.0):
-                next_lap_start = True
-                # self.get_logger().info(f'Next lap start!')
-
         # show results
-        sim_logger.show_results(lap_times, self._car)
+        sim_logger.show_results(self._current_laps, self._lap_times, self._car)
 
     @classmethod
     def in_pkg_share(cls, file_path: str) -> str:
