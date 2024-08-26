@@ -31,8 +31,10 @@ ament_python_install_package(${PROJECT_NAME}
 install(PROGRAMS
   scripts/run_mpc_controller.bash
   scripts/run_mpc_simulation.bash
+  scripts/path_constraints_provider.bash
   scripts/mpc_controller
   scripts/mpc_simulation
+  scripts/path_constraints_provider
   scripts/publish_initialpose
   DESTINATION lib/${PROJECT_NAME}
 )

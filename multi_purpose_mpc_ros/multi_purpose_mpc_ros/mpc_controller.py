@@ -36,7 +36,7 @@ from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec, l
 from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
 from multi_purpose_mpc_ros.simulation_logger import SimulationLogger
 from multi_purpose_mpc_ros.obstacle_manager import ObstacleManager
-from multi_purpose_mpc_ros_msgs.msg import AckermannControlBoostCommand
+from multi_purpose_mpc_ros_msgs.msg import AckermannControlBoostCommand, PathConstraints
 
 def array_to_ackermann_control_command(stamp, u: np.ndarray, acc: float) -> AckermannControlCommand:
     msg = AckermannControlCommand()
@@ -258,6 +258,7 @@ class MPCController(Node):
         compute_speed_profile(self._car, self._mpc_cfg)
 
         self._trajectory: Optional[Trajectory] = None
+        self._path_constraints = None
 
         # Obstacles
         self._use_obstacles_topic = self._obstacles == []
@@ -298,6 +299,8 @@ class MPCController(Node):
             Trajectory, "planning/scenario_planning/trajectory", self._trajectory_callback, 1)
         self._awsim_status_sub = self.create_subscription(
             Float32MultiArray, "/aichallenge/awsim/status", self._awsim_status_callback, 1)
+        self._path_constraints_sub = self.create_subscription(
+            PathConstraints, "/path_constraints_provider/path_constraints", self._path_constraints_callback, 1)
 
     def _odom_callback(self, msg: Odometry) -> None:
         self._odom = msg
@@ -321,6 +324,10 @@ class MPCController(Node):
         if msg.data:
             self.get_logger().info("Control mode request received")
             self._enable_control = True
+
+    def _path_constraints_callback(self, msg):
+        self._
+
 
     def _trajectory_callback(self, msg):
         self._trajectory = msg
@@ -450,7 +457,7 @@ class MPCController(Node):
         # for i in range(10):
         #     self._obstacle_manager.push_next_obstacle()
 
-        self._publish_ref_path_marker(self._car.reference_path)
+        # self._publish_ref_path_marker(self._car.reference_path)
 
         t_start = self.get_clock().now()
         last_t = t_start
@@ -523,7 +530,7 @@ class MPCController(Node):
                     acc = self._mpc_cfg.a_max
                 else:
                     bug_acc_enabled = True
-                    acc = 480.0
+                    acc = 490.0
             else:
                 acc =  kp * (u[0] - v)
                 # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
