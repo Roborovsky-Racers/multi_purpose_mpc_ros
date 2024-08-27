@@ -25,6 +25,7 @@ reference_path:
   smoothing_distance: 3
   max_width: 5.0
   circular: true
+  use_path_constraints_topic: true
 
 bicycle_model:
   length: 1.087
@@ -40,6 +41,6 @@ mpc:
   a_max: 3.2 # m/s^2
   ay_max: 50.0 # m/s^2, maximum lateral acceleration in curves
   delta_max_deg: 80.0 # degrees
-  control_rate: 25.0 # Hz
+  control_rate: 50.0 # Hz
 
 

@@ -90,7 +90,7 @@ class PathConstraintsProvider(Node):
 
         latching_qos = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
         self._path_constraints_pub = self.create_publisher(
-            Pathonstraints, "~/path_constraints", latching_qos)
+            PathConstraints, "~/path_constraints", latching_qos)
 
     def _obstacles_callback(self, msg: Float64MultiArray) -> None:
         obstacles_updated = (self._last_obstacles_msgs_raw != msg.data) and (len(msg.data) > 0)
@@ -219,6 +219,8 @@ class PathConstraintsProvider(Node):
 
         rate = self.create_rate(0.5)
         while rclpy.ok():
+            self._path_constraints.upper_bounds = []
+            self._path_constraints.lower_bounds = []
             for wp_id in range(self._reference_path.n_waypoints-1):
 
                 if self._obstacles_updated:

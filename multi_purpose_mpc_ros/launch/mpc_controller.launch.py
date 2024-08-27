@@ -50,9 +50,26 @@ def launch_setup(context, *args, **kwargs):
         parameters=[use_sim_time]
     )
 
+    path_constraints_provider = Node(
+        package="multi_purpose_mpc_ros",
+        executable="path_constraints_provider.bash",
+        name="path_constraints_provider",
+        output="both",
+        emulate_tty=True,  # https://github.com/ros2/launch/issues/188
+        arguments=[
+            "--config_path",
+            str(config_path),
+            "--ros-args",
+            "--log-level",
+            "info",
+        ],
+        parameters=[use_sim_time]
+    )
+
     return [
         mpc_controller,
-        boost_commander
+        boost_commander,
+        path_constraints_provider
     ]
 
 
