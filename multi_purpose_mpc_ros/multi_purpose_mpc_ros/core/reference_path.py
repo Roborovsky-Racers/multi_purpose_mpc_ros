@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 import numpy as np
 import numpy.ma as ma
 import math
@@ -114,6 +114,14 @@ class ReferencePath:
 
         # Compute path width (attribute of each waypoint)
         self._compute_width(max_width=max_width)
+
+        self.path_constraints: Optional[List[np.ndarray]] = None
+
+    def set_path_constraints(self, upper_bounds: List[float], lower_bounds: List[float], n_rows, n_cols) -> None:
+        self.path_constraints = [
+            np.array(upper_bounds).reshape(n_rows, n_cols),
+            np.array(lower_bounds).reshape(n_rows, n_cols)
+        ]
 
     def _construct_path(self, wp_x, wp_y):
         """
