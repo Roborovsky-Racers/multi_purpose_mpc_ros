@@ -361,7 +361,7 @@ class MPCController(Node):
         self._wait_until_message_received(lambda: self._enable_control, 'control mode request', timeout)
 
     def _wait_until_trajectory_received(self, timeout: float = 30.) -> None:
-        if self._cfg.reference_path.update_by_topic:
+        if not self._cfg.reference_path.update_by_topic:
             return
         self._wait_until_message_received(lambda: self._trajectory, 'trajectory', timeout)
 
