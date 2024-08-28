@@ -69,21 +69,26 @@ class MPC:
         xmin = self.state_constraints['xmin']
         xmax = self.state_constraints['xmax']
 
+        # Precompute common terms
+        nx_N = self.nx * (N + 1)
+        nu_N = self.nu * N
+
         # LTV System Matrices
-        A = np.zeros((self.nx * (N + 1), self.nx * (N + 1)))
-        B = np.zeros((self.nx * (N + 1), self.nu * (N)))
+        A = np.zeros((nx_N, nx_N))
+        B = np.zeros((nx_N, nu_N))
+
         # Reference vector for state and input variables
-        ur = np.zeros(self.nu*N)
-        xr = np.zeros(self.nx*(N+1))
+        ur = np.zeros(nu_N)
+        xr = np.zeros(nx_N)
         # Offset for equality constraint (due to B * (u - ur))
         uq = np.zeros(N * self.nx)
-        # Dynamic state constraints
+
+        # Dynamic constraints
         xmin_dyn = np.kron(np.ones(N + 1), xmin)
         xmax_dyn = np.kron(np.ones(N + 1), xmax)
-        # Dynamic input constraints
         umax_dyn = np.kron(np.ones(N), umax)
         # Get curvature predictions from previous control signals
-        kappa_pred = np.tan(np.array(self.current_control[3::] +
+        kappa_pred = np.tan(np.array(self.current_control[3:] +
                                      self.current_control[-1:])) / self.model.length
 
         # Iterate over horizon
@@ -102,28 +107,28 @@ class MPC:
             B[(n+1) * self.nx: (n+2)*self.nx, n * self.nu:(n+1)*self.nu] = B_lin
 
             # Set reference for input signal
-            ur[n*self.nu:(n+1)*self.nu] = np.array([v_ref, kappa_ref])
+            ur[n*self.nu:(n+1)*self.nu] = [v_ref, kappa_ref]
             # Compute equality constraint offset (B*ur)
-            uq[n * self.nx:(n+1)*self.nx] = B_lin.dot(np.array
-                                            ([v_ref, kappa_ref])) - f
+            uq[n * self.nx:(n+1)*self.nx] = B_lin.dot([v_ref, kappa_ref]) - f
 
             # Constrain maximum speed based on predicted car curvature
             vmax_dyn = np.sqrt(self.ay_max / (np.abs(kappa_pred[n]) + 1e-12))
-            if vmax_dyn < umax_dyn[self.nu*n]:
-                umax_dyn[self.nu*n] = vmax_dyn
+            umax_dyn[self.nu*n] = min(vmax_dyn, umax_dyn[self.nu*n])
 
+        # Update path constraints
         if self.model.reference_path.path_constraints is None:
-            min_width = 2*self.model.safety_margin
-            #Compute dynamic constraints on e_y
+            min_width = 2 * self.model.safety_margin
             ub, lb, _ = self.model.reference_path.update_path_constraints(
-                        self.model.wp_id+1, N, min_width,
+                self.model.wp_id + 1,
+                N,
+                min_width,
                 self.model.safety_margin)
         else:
             ub = self.model.reference_path.path_constraints[0][self.model.wp_id]
             lb = self.model.reference_path.path_constraints[1][self.model.wp_id]
 
-        xmin_dyn[0] = self.model.spatial_state.e_y
-        xmax_dyn[0] = self.model.spatial_state.e_y
+        # Update dynamic state constraints
+        xmin_dyn[0] = xmax_dyn[0] = self.model.spatial_state.e_y
         xmin_dyn[self.nx::self.nx] = lb
         xmax_dyn[self.nx::self.nx] = ub
 
@@ -136,25 +141,21 @@ class MPC:
         Bu = sparse.csc_matrix(B)
         Aeq = sparse.hstack([Ax, Bu])
         # Get inequality matrix
-        Aineq = sparse.eye((N + 1) * self.nx + N * self.nu)
-        # Combine constraint matrices
+        Aineq = sparse.eye(nx_N + nu_N)
         A = sparse.vstack([Aeq, Aineq], format='csc')
 
-        # Get upper and lower bound vectors for equality constraints
-        lineq = np.hstack([xmin_dyn,
-                           np.kron(np.ones(N), umin)])
-        uineq = np.hstack([xmax_dyn, umax_dyn])
-        # Get upper and lower bound vectors for inequality constraints
+        # Construct bounds
         x0 = np.array(self.model.spatial_state[:])
         leq = np.hstack([-x0, uq])
         ueq = leq
-        # Combine upper and lower bound vectors
+        lineq = np.hstack([xmin_dyn, np.kron(np.ones(N), umin)])
+        uineq = np.hstack([xmax_dyn, umax_dyn])
         l = np.hstack([leq, lineq])
         u = np.hstack([ueq, uineq])
 
         # Set cost matrices
         P = sparse.block_diag([sparse.kron(sparse.eye(N), self.Q), self.QN,
-             sparse.kron(sparse.eye(N), self.R)], format='csc')
+                               sparse.kron(sparse.eye(N), self.R)], format='csc')
         q = np.hstack(
             [-np.tile(np.diag(self.Q.toarray()), N) * xr[:-self.nx],
              -self.QN.dot(xr[-self.nx:]),
