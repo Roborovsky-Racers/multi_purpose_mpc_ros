@@ -20,36 +20,6 @@ def launch_setup(context, *args, **kwargs):
         / "config.yaml"
     )
 
-    mpc_controller = Node(
-        package="multi_purpose_mpc_ros",
-        executable="run_mpc_controller.bash",
-        name="mpc_controller",
-        output="both",
-        emulate_tty=True,  # https://github.com/ros2/launch/issues/188
-        arguments=[
-            "--config_path",
-            str(config_path),
-            "--ros-args",
-            "--log-level",
-            "info",
-        ],
-        parameters=[use_sim_time]
-    )
-
-    boost_commander = Node(
-        package="multi_purpose_mpc_ros",
-        executable="boost_commander",
-        name="boost_commander",
-        output="both",
-        emulate_tty=True,  # https://github.com/ros2/launch/issues/188
-        arguments=[
-            "--ros-args",
-            "--log-level",
-            "info",
-        ],
-        parameters=[use_sim_time]
-    )
-
     path_constraints_provider = Node(
         package="multi_purpose_mpc_ros",
         executable="path_constraints_provider.bash",
@@ -67,8 +37,6 @@ def launch_setup(context, *args, **kwargs):
     )
 
     return [
-        mpc_controller,
-        boost_commander,
         path_constraints_provider
     ]
 
