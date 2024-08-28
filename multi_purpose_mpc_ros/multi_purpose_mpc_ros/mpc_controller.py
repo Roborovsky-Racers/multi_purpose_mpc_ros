@@ -377,7 +377,6 @@ class MPCController(Node):
     def _wait_until_path_constraints_received(self, timeout: float = 30.) -> None:
         if self._cfg.reference_path.use_path_constraints_topic: # type: ignore
             self._wait_until_message_received(lambda: self._reference_path.path_constraints, 'path constraints', timeout)
-        return
 
     def _publish_mpc_pred_marker(self, x_pred, y_pred):
         pred_marker_array = MarkerArray()
@@ -439,7 +438,6 @@ class MPCController(Node):
         self._wait_until_control_mode_request_received()
         self._wait_until_aw_sim_status_received()
         self._wait_until_trajectory_received()
-        self._wait_until_path_constraints_received()
         self._wait_until_path_constraints_received()
 
         control_rate = self.create_rate(self._mpc_cfg.control_rate)
