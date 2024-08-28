@@ -36,7 +36,7 @@ from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec, l
 from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
 from multi_purpose_mpc_ros.simulation_logger import SimulationLogger
 from multi_purpose_mpc_ros.obstacle_manager import ObstacleManager
-from multi_purpose_mpc_ros_msgs.msg import AckermannControlBoostCommand
+from multi_purpose_mpc_ros_msgs.msg import AckermannControlBoostCommand, PathConstraints
 
 def array_to_ackermann_control_command(stamp, u: np.ndarray, acc: float) -> AckermannControlCommand:
     msg = AckermannControlCommand()
@@ -131,7 +131,7 @@ class MPCController(Node):
             file_exists(self.in_pkg_share(file_path))
         return cfg
 
-    def _create_reference_path_from_autoware_trajectory(self, trajectory: Trajectory) -> ReferencePath:
+    def _create_reference_path_from_autoware_trajectory(self, trajectory: Trajectory) -> Optional[ReferencePath]:
         wp_x = [0] * len(trajectory.points)
         wp_y = [0] * len(trajectory.points)
         for i, p in enumerate(trajectory.points):
@@ -258,6 +258,7 @@ class MPCController(Node):
         compute_speed_profile(self._car, self._mpc_cfg)
 
         self._trajectory: Optional[Trajectory] = None
+        self._path_constraints = None
 
         # Obstacles
         self._use_obstacles_topic = self._obstacles == []
@@ -298,6 +299,8 @@ class MPCController(Node):
             Trajectory, "planning/scenario_planning/trajectory", self._trajectory_callback, 1)
         self._awsim_status_sub = self.create_subscription(
             Float32MultiArray, "/aichallenge/awsim/status", self._awsim_status_callback, 1)
+        self._path_constraints_sub = self.create_subscription(
+            PathConstraints, "/path_constraints_provider/path_constraints", self._path_constraints_callback, 1)
 
     def _odom_callback(self, msg: Odometry) -> None:
         self._odom = msg
@@ -321,6 +324,10 @@ class MPCController(Node):
         if msg.data:
             self.get_logger().info("Control mode request received")
             self._enable_control = True
+
+    def _path_constraints_callback(self, msg: PathConstraints):
+        self._reference_path.set_path_constraints(
+            msg.upper_bounds, msg.lower_bounds, msg.rows, msg.cols)
 
     def _trajectory_callback(self, msg):
         self._trajectory = msg
@@ -367,6 +374,9 @@ class MPCController(Node):
 
     def _wait_until_aw_sim_status_received(self, timeout: float = 30.) -> None:
         self._wait_until_message_received(lambda: self._current_laps, 'AWSIM status', timeout)
+
+    def _wait_until_path_constraints_received(self, timeout: float = 30.) -> None:
+        self._wait_until_message_received(lambda: self._reference_path.path_constraints, 'path constraints', timeout)
 
     def _publish_mpc_pred_marker(self, x_pred, y_pred):
         pred_marker_array = MarkerArray()
@@ -426,8 +436,11 @@ class MPCController(Node):
         self._wait_until_clock_received()
         self._wait_until_odom_received()
         self._wait_until_control_mode_request_received()
-        self._wait_until_trajectory_received()
         self._wait_until_aw_sim_status_received()
+        if self._cfg.reference_path.update_by_topic: # type: ignore
+            self._wait_until_trajectory_received()
+        if self._cfg.reference_path.use_path_constraints_topic: # type: ignore
+            self._wait_until_path_constraints_received()
 
         control_rate = self.create_rate(self._mpc_cfg.control_rate)
 
@@ -456,6 +469,7 @@ class MPCController(Node):
         while rclpy.ok() and (not sim_logger.stop_requested()) and self._current_laps <= self.MAX_LAPS:
             # self.get_logger().info("loop")
             control_rate.sleep()
+            t_start_time = time.time()
 
             if loop % 100 == 0:
                 # update obstacles
@@ -522,7 +536,7 @@ class MPCController(Node):
                     acc = self._mpc_cfg.a_max
                 else:
                     bug_acc_enabled = True
-                    acc = 480.0
+                    acc = 490.0
             else:
                 acc =  kp * (u[0] - v)
                 # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
@@ -545,8 +559,11 @@ class MPCController(Node):
 
 
             # 約 0.25 秒ごとに予測結果を表示
-            # if loop % (self._mpc_cfg.control_rate // 4) == 0:
-            self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
+            if loop % (self._mpc_cfg.control_rate // 4) == 0:
+                self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
+
+            if loop & 100 == 0:
+                print(time.time() - t_start_time)
 
         # show results
         sim_logger.show_results(self._current_laps, self._lap_times, self._car)
