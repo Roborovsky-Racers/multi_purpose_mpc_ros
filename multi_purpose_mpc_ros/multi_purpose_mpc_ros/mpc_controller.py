@@ -441,6 +441,7 @@ class MPCController(Node):
         self._wait_until_aw_sim_status_received()
         self._wait_until_trajectory_received()
         self._wait_until_path_constraints_received()
+        self._wait_until_path_constraints_received()
 
         control_rate = self.create_rate(self._mpc_cfg.control_rate)
 
