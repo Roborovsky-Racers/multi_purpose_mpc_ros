@@ -369,8 +369,7 @@ class MPCController(Node):
 
     def _wait_until_trajectory_received(self, timeout: float = 30.) -> None:
         if self._cfg.reference_path.update_by_topic:
-            return
-        self._wait_until_message_received(lambda: self._trajectory, 'trajectory', timeout)
+            self._wait_until_message_received(lambda: self._trajectory, 'trajectory', timeout)
 
     def _wait_until_aw_sim_status_received(self, timeout: float = 30.) -> None:
         self._wait_until_message_received(lambda: self._current_laps, 'AWSIM status', timeout)
@@ -437,8 +436,7 @@ class MPCController(Node):
         self._wait_until_odom_received()
         self._wait_until_control_mode_request_received()
         self._wait_until_aw_sim_status_received()
-        if self._cfg.reference_path.update_by_topic: # type: ignore
-            self._wait_until_trajectory_received()
+        self._wait_until_trajectory_received()
         if self._cfg.reference_path.use_path_constraints_topic: # type: ignore
             self._wait_until_path_constraints_received()
 
