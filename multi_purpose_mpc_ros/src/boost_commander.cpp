@@ -23,8 +23,8 @@ BoostCommander::BoostCommander(rclcpp::Node::SharedPtr node)
 
 void BoostCommander::run()
 {
-  rclcpp::Rate high_rate(1500);
-  rclcpp::Rate low_rate(20);
+  rclcpp::Rate high_rate(1600);
+  rclcpp::Rate low_rate(50);
 
   while (rclcpp::ok())
   {
