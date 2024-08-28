@@ -368,7 +368,7 @@ class MPCController(Node):
         self._wait_until_message_received(lambda: self._enable_control, 'control mode request', timeout)
 
     def _wait_until_trajectory_received(self, timeout: float = 30.) -> None:
-        if self._cfg.reference_path.update_by_topic:
+        if not self._cfg.reference_path.update_by_topic:
             return
         self._wait_until_message_received(lambda: self._trajectory, 'trajectory', timeout)
 
@@ -376,6 +376,8 @@ class MPCController(Node):
         self._wait_until_message_received(lambda: self._current_laps, 'AWSIM status', timeout)
 
     def _wait_until_path_constraints_received(self, timeout: float = 30.) -> None:
+        if not self._cfg.reference_path.use_path_constraints_topic: # type: ignore
+            return
         self._wait_until_message_received(lambda: self._reference_path.path_constraints, 'path constraints', timeout)
 
     def _publish_mpc_pred_marker(self, x_pred, y_pred):
@@ -437,10 +439,8 @@ class MPCController(Node):
         self._wait_until_odom_received()
         self._wait_until_control_mode_request_received()
         self._wait_until_aw_sim_status_received()
-        if self._cfg.reference_path.update_by_topic: # type: ignore
-            self._wait_until_trajectory_received()
-        if self._cfg.reference_path.use_path_constraints_topic: # type: ignore
-            self._wait_until_path_constraints_received()
+        self._wait_until_trajectory_received()
+        self._wait_until_path_constraints_received()
 
         control_rate = self.create_rate(self._mpc_cfg.control_rate)
 
@@ -466,10 +466,10 @@ class MPCController(Node):
 
         t_start = self.get_clock().now()
         last_t = t_start
+        cmd = AckermannControlBoostCommand()
         while rclpy.ok() and (not sim_logger.stop_requested()) and self._current_laps <= self.MAX_LAPS:
             # self.get_logger().info("loop")
             control_rate.sleep()
-            t_start_time = time.time()
 
             if loop % 100 == 0:
                 # update obstacles
@@ -548,7 +548,6 @@ class MPCController(Node):
 
 
             self._car.drive(u)
-            cmd = AckermannControlBoostCommand()
             cmd.command = array_to_ackermann_control_command(now.to_msg(), u, acc)
             cmd.boost_mode = self.USE_BUG_ACC and bug_acc_enabled
             self._command_pub.publish(cmd)
@@ -562,8 +561,6 @@ class MPCController(Node):
             if loop % (self._mpc_cfg.control_rate // 4) == 0:
                 self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
 
-            if loop & 100 == 0:
-                print(time.time() - t_start_time)
 
         # show results
         sim_logger.show_results(self._current_laps, self._lap_times, self._car)
