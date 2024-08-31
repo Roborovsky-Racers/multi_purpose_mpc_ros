@@ -20,6 +20,7 @@ from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 from std_msgs.msg import Bool, Float32MultiArray, Float64MultiArray
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Quaternion, Pose2D, Point
+from std_msgs.msg import ColorRGBA
 
 # autoware
 from autoware_auto_control_msgs.msg import AckermannControlCommand
@@ -386,13 +387,10 @@ class MPCController(Node):
         m_base.type = Marker.SPHERE
         m_base.action = Marker.ADD
         m_base.pose.position.z = 0.0
-        m_base.scale.x = 0.3
-        m_base.scale.y = 0.3
-        m_base.scale.z = 0.3
-        m_base.color.a = 1.0
-        m_base.color.r = 0.0
-        m_base.color.g = 1.0
-        m_base.color.b = 0.0
+        m_base.scale.x = 0.5
+        m_base.scale.y = 0.5
+        m_base.scale.z = 0.5
+        m_base.color = self._pred_marker_color
         for i in range(len(x_pred)):
             m = copy.deepcopy(m_base)
             m.id = i
@@ -433,6 +431,22 @@ class MPCController(Node):
         PLOT_RESULTS = False
         ANIMATION_INTERVAL = 20
 
+        RED = ColorRGBA()
+        RED.a = 1.0
+        RED.r = 1.0
+        RED.g = 0.0
+        RED.b = 0.0
+        YELLOW = ColorRGBA()
+        YELLOW.a = 1.0
+        YELLOW.r = 1.0
+        YELLOW.g = 1.0
+        YELLOW.b = 0.0
+        CYAN = ColorRGBA()
+        CYAN.a = 1.0
+        CYAN.r = 0.0
+        CYAN.g = 156.0 / 255.0
+        CYAN.b = 209.0 / 255.0
+
         self._wait_until_clock_received()
         self._wait_until_odom_received()
         self._wait_until_control_mode_request_received()
@@ -461,6 +475,8 @@ class MPCController(Node):
         #     self._obstacle_manager.push_next_obstacle()
 
         self._publish_ref_path_marker(self._car.reference_path)
+
+        self._pred_marker_color = ColorRGBA()
 
         t_start = self.get_clock().now()
         last_t = t_start
@@ -512,7 +528,7 @@ class MPCController(Node):
             # print(f"car x: {self._car.temporal_state.x}, y: {self._car.temporal_state.y}, psi: {self._car.temporal_state.psi}")
             # print(f"mpc x: {self._mpc.model.temporal_state.x}, y: {self._mpc.model.temporal_state.y}, psi: {self._mpc.model.temporal_state.psi}")
 
-            u: np.ndarray = self._mpc.get_control()
+            u, max_delta = self._mpc.get_control()
             # self.get_logger().info(f"u: {u}")
 
             if len(u) == 0:
@@ -529,12 +545,15 @@ class MPCController(Node):
                  (abs(v) > kmh_to_m_per_sec(38.0) and abs(max_delta) > deg2rad(12.0)):
                     bug_acc_enabled = False
                     acc = self._mpc_cfg.a_min / 3.0 * 2.0
+                    self._pred_marker_color = RED
                 elif abs(v) > kmh_to_m_per_sec(41.0) or abs(u[1]) > deg2rad(10.0):
                     bug_acc_enabled = False
                     acc = self._mpc_cfg.a_max
+                    self._pred_marker_color = YELLOW
                 else:
                     bug_acc_enabled = True
                     acc = 500.0
+                    self._pred_marker_color = CYAN
             else:
                 acc =  kp * (u[0] - v)
                 # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
@@ -556,8 +575,9 @@ class MPCController(Node):
 
 
             # 約 0.25 秒ごとに予測結果を表示
-            if loop % (self._mpc_cfg.control_rate // 4) == 0:
-                self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
+            # if loop % (self._mpc_cfg.control_rate // 4) == 0:
+            #     self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
+            self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
 
 
         # show results
