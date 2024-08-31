@@ -525,11 +525,11 @@ class MPCController(Node):
                 def deg2rad(deg):
                     return deg * np.pi / 180.0
 
-                if abs(v) > kmh_to_m_per_sec(43.0) or \
-                 (abs(v) > kmh_to_m_per_sec(38.0) and abs(u[1]) > deg2rad(10.0)):
+                if abs(v) > kmh_to_m_per_sec(44.0) or \
+                 (abs(v) > kmh_to_m_per_sec(38.0) and abs(max_delta) > deg2rad(12.0)):
                     bug_acc_enabled = False
-                    acc = self._mpc_cfg.a_min / 2.0
-                elif abs(v) > kmh_to_m_per_sec(38.0) or abs(u[1]) > deg2rad(10.0):
+                    acc = self._mpc_cfg.a_min / 3.0 * 2.0
+                elif abs(v) > kmh_to_m_per_sec(41.0) or abs(u[1]) > deg2rad(10.0):
                     bug_acc_enabled = False
                     acc = self._mpc_cfg.a_max
                 else:
