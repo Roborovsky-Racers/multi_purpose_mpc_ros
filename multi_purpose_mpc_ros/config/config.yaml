@@ -25,7 +25,7 @@ reference_path:
   smoothing_distance: 3
   max_width: 5.0
   circular: true
-  use_path_constraints_topic: false
+  use_path_constraints_topic: true
   use_border_cells_topic: true
 
 bicycle_model:
@@ -33,7 +33,7 @@ bicycle_model:
   width: 1.35
 
 mpc:
-  N: 6
+  N: 20
   Q: [3.0, 100.0, 5.0]  # [v, delta, t]
   R: [0.0, 300.0]      # [v, delta]
   QN: [3.0, 1.5, 5.0]

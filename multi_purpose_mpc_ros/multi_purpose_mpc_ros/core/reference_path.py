@@ -565,22 +565,17 @@ class ReferencePath:
                                [self.waypoints[0].static_border_cells[1][0]])
             wp_lb_y = np.array([wp.dynamic_border_cells[1][1] for wp in self.waypoints] +
                                [self.waypoints[0].static_border_cells[1][1]])
-        # ax.plot(wp_ub_x[0:-1], wp_ub_y[0:-1], c=PATH_CONSTRAINTS)
-        # ax.plot(wp_lb_x[0:-1], wp_lb_y[0:-1], c=PATH_CONSTRAINTS)
-
-        # for rects in self.rect_points:
-        #     COLOR = ['red', 'blue', 'green', 'yellow']
-        #     for i, rect_points in enumerate(rects):
-        #         ax.plot(rect_points[:,0], rect_points[:,1], "o-", color=COLOR[i], markersize=1, linewidth=1)
+        ax.plot(wp_ub_x[0:-1], wp_ub_y[0:-1], c=PATH_CONSTRAINTS)
+        ax.plot(wp_lb_x[0:-1], wp_lb_y[0:-1], c=PATH_CONSTRAINTS)
 
         # self.cols = np.array(self.cols)
         # print(len(self.cols))
-        for i, cols in enumerate(self.upper_cols):
-            COLOR = ['red', 'blue', 'green', 'yellow']
-            ax.plot(cols[0], cols[1], "o-", color=COLOR[i%4], markersize=2, linewidth=1)
-        for i, cols in enumerate(self.lower_cols):
-            COLOR = ['red', 'blue', 'green', 'yellow']
-            ax.plot(cols[0], cols[1], "*--", color=COLOR[i%4], markersize=2, linewidth=2)
+        # for i, cols in enumerate(self.upper_cols):
+        #     COLOR = ['red', 'blue', 'green', 'yellow']
+        #     ax.plot(cols[0], cols[1], "o-", color=COLOR[i%4], markersize=2, linewidth=1)
+        # for i, cols in enumerate(self.lower_cols):
+        #     COLOR = ['red', 'blue', 'green', 'yellow']
+        #     ax.plot(cols[0], cols[1], "*--", color=COLOR[i%4], markersize=2, linewidth=2)
 
         # Plot obstacles
         # for obstacle in self.map.obstacles:
@@ -715,11 +710,11 @@ class ReferencePath:
         self.upper_cols = []
         self.lower_cols = []
 
-        self.COUNT += 1
-        show = False
-        if self.COUNT == 100:
-            show = True
-            self.COUNT = 0
+        # self.COUNT += 1
+        # show = False
+        # if self.COUNT == 100:
+        #     show = True
+        #     self.COUNT = 0
 
         # compute free segments for each waypoints in horizon
         free_segments_hor = []
@@ -740,11 +735,8 @@ class ReferencePath:
 
             # Iterate over free segments for current waypoint
             if len(free_segments) >= 2:
-                ub_pw, lb_pw = border_cells_hor[n-1]
-                ub_pw, lb_pw = list(ub_pw), list(lb_pw)
-
                 free_segments_indices = [[idx for idx in range(len(free_segments))]]
-                for i in range(n+1, n+3):
+                for i in range(n+1, n+5):
                     if i >= N:
                         break
                     free_segments = free_segments_hor[i]
@@ -754,18 +746,12 @@ class ReferencePath:
                       free_segments_indices.append([idx for idx in range(len(free_segments))])
 
                 free_segments_indices_combinations = itertools.product(*free_segments_indices)
-                if show:
-                    print(f"n :{n}, free_segments_indices: {free_segments_indices}")
+                # if show:
+                #     print(f"n :{n}, free_segments_indices: {free_segments_indices}")
 
                 def calculate_combination_total_area(index_combination, ub_pw, lb_pw):
                     total_area = 0.0
 
-                    ub_prev_x, ub_prev_y = ub_pw
-                    lb_prev_x, lb_prev_y = lb_pw
-                    ub_prev = [ub_prev_x, ub_prev_y]
-                    lb_prev = [lb_prev_x, lb_prev_y]
-
-                    print(f"====================")
                     for i, segment_index in enumerate(index_combination):
                         ub_fs, lb_fs = free_segments_hor[n+i][segment_index]
 
@@ -774,45 +760,43 @@ class ReferencePath:
                             p1m = self.map.w2m(p1[0], p1[1])
                             x_list, y_list, _ = line_aa(p0m[0], p0m[1], p1m[0], p1m[1])
 
-                            occupied_indices = self.map.data[y_list[2:-3], x_list[2:-3]] == 0
-                            print(occupied_indices)
-                            # return False
+                            occupied_indices = self.map.data[y_list, x_list] == 0
                             if np.any(occupied_indices):
                                 return True
                             else:
                                 return False
 
-                        # Compute path from left border cell to right border cell
-                        if has_collision(ub_prev, ub_fs) and has_collision(lb_prev, lb_fs):
-                            pass
-                            # self.upper_cols.append([[ub_prev[0], ub_fs[0]], [ub_prev[1], ub_fs[1]]])
-                            # self.lower_cols.append([[lb_prev[0], lb_fs[0]], [lb_prev[1], lb_fs[1]]])
-                            # return -1000000.0
-                        else:
-                            self.upper_cols.append([[ub_prev[0], ub_fs[0]], [ub_prev[1], ub_fs[1]]])
-                            self.lower_cols.append([[lb_prev[0], lb_fs[0]], [lb_prev[1], lb_fs[1]]])
+                        mean_prev = (np.array(ub_pw) + np.array(lb_pw)) / 2.
+                        mean_fs = (np.array(ub_fs) + np.array(lb_fs)) / 2.
 
-                        total_area += calculate_area([ub_fs, lb_fs, lb_prev, ub_prev])
-                        ub_prev = [ub_fs[0], ub_fs[1]]
-                        lb_prev = [lb_fs[0], lb_fs[1]]
+                        if has_collision(mean_prev, mean_fs):
+                            self.upper_cols.append([[mean_prev[0], mean_fs[0]], [mean_prev[1], mean_fs[1]]])
+                            return -1000000.0 # penalty because has collision!
+
+                        total_area += calculate_area([ub_fs, lb_fs, lb_pw, ub_pw])
+                        ub_pw = ub_fs
+                        lb_pw = lb_fs
+
                     return total_area
 
                 combination_areas = []
                 combination_indices = []
                 for combination in free_segments_indices_combinations:
+                    if n > 0:
+                        ub_pw, lb_pw = border_cells_hor[n-1]
+                    else:
+                        ub_pw, lb_pw =  free_segments_hor[n][combination[0]]
                     total_area = calculate_combination_total_area(combination, ub_pw, lb_pw)
                     combination_areas.append(total_area)
                     combination_indices.append(combination)
-                    # break
 
                 max_area = max(combination_areas)
                 max_area_index = combination_areas.index(max_area)
                 max_area_combination_indices = combination_indices[max_area_index]
 
-                # max_area_combination_indices = (1,0)
-                if show:
-                    print(f"max_area_combination_indices: {max_area_combination_indices}")
-                    print(f"n: {n}, combination_areas: {combination_areas}, combination_indices: {combination_indices}")
+                # if show:
+                #     print(f"max_area_combination_indices: {max_area_combination_indices}")
+                #     print(f"n: {n}, combination_areas: {combination_areas}, combination_indices: {combination_indices}")
 
                 for i in max_area_combination_indices:
                     wp = self.get_waypoint(wp_id+n)
@@ -833,8 +817,8 @@ class ReferencePath:
                 add_constraint(wp, ub_ls, lb_ls)
                 n += 1  # increment waypoint index
 
-        if show:
-            print(f"ub_hor: {ub_hor}, lb_hor: {lb_hor}")
+        # if show:
+        #     print(f"ub_hor: {ub_hor}, lb_hor: {lb_hor}")
 
         return np.array(ub_hor), np.array(lb_hor), np.array(border_cells_hor_sm)
 
