@@ -131,27 +131,6 @@ class MPCController(Node):
             file_exists(self.in_pkg_share(file_path))
         return cfg
 
-    def _reconstruct_reference_path(self) -> Optional[ReferencePath]:
-        cfg_ref_path = self._cfg.reference_path # type: ignore
-        reference_path = ReferencePath(
-            self._map,
-            self._car.reference_path.org_wp_x,
-            self._car.reference_path.org_wp_y,
-            cfg_ref_path.resolution,
-            cfg_ref_path.smoothing_distance,
-            cfg_ref_path.max_width,
-            cfg_ref_path.circular)
-
-        mpc_config = self._mpc_cfg
-        speed_profile_constraints = {
-            "a_min": mpc_config.a_min, "a_max": mpc_config.a_max,
-            "v_min": 0.0, "v_max": mpc_config.v_max, "ay_max": mpc_config.ay_max}
-
-        if not reference_path.compute_speed_profile(speed_profile_constraints):
-            return None
-
-        return reference_path
-
     def _create_reference_path_from_autoware_trajectory(self, trajectory: Trajectory) -> Optional[ReferencePath]:
         wp_x = [0] * len(trajectory.points)
         wp_y = [0] * len(trajectory.points)
@@ -587,8 +566,8 @@ class MPCController(Node):
 
 
             # 約 0.25 秒ごとに予測結果を表示
-            # if loop % (self._mpc_cfg.control_rate // 4) == 0:
-            #     self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
+            if loop % (self._mpc_cfg.control_rate // 4) == 0:
+                self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
 
 
         # show results

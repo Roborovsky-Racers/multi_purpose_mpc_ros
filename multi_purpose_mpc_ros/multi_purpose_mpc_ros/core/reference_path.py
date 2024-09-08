@@ -327,175 +327,6 @@ class ReferencePath:
             wp.static_border_cells = (width_info[1], width_info[3])   # (left_border_cell(x,y), right_border_cell(x,y))
             wp.dynamic_border_cells = (width_info[1], width_info[3])
 
-    def _update_width(self, max_width):
-        """
-        Compute the width of the path by checking the maximum free space to
-        the left and right of the center-line.
-        :param max_width: maximum width of the path.
-        """
-
-        # Iterate over all waypoints
-        self._center_x = []
-        self._center_y = []
-        self._obst_center_x = []
-        self._obst_center_y = []
-        self._obst_left_candidate_x = []
-        self._obst_left_candidate_y = []
-        self._obst_right_candidate_x = []
-        self._obst_right_candidate_y = []
-        self._obst_modified_center_x = []
-        self._obst_modified_center_y = []
-        self._left_min_width = []
-        self._right_min_width = []
-
-        for wp_id, wp in enumerate(self.waypoints):
-            left_angle = np.mod(wp.psi + math.pi / 2 + math.pi,
-                             2 * math.pi) - math.pi
-            right_angle = np.mod(wp.psi - math.pi / 2 + math.pi,
-                               2 * math.pi) - math.pi
-
-            # Get pixel coordinates of waypoint
-            wp_x, wp_y = self.map.w2m(wp.x, wp.y)
-
-            # for debug
-            center_x, center_y = self.map.m2w(wp_x, wp_y)
-            self._center_x.append(center_x)
-            self._center_y.append(center_y)
-
-            # WP位置上に障害物がある場合、_get_min_width が適切な結果を返さない。
-            # その場合は、WP位置から左右にセルを捜査し、障害物がないセルのうち、より中心に近いセルを基準WPとして選択する
-            # Check if the waypoint is free of obstacles
-            # Search around the target cell for obstacles
-            if self._is_obstacle_occupied(wp_x, wp_y):
-                # for debug
-                self._obst_center_x.append(center_x)
-                self._obst_center_y.append(center_y)
-
-                # Waypoint is occupied by an obstacle
-                left_clear_cell = None
-                right_clear_cell = None
-
-                # Search towards left and right walls for the first free cell
-                for dir in ['left', 'right']:
-                    angle = left_angle if dir == 'left' else right_angle
-
-                    # Get closest cell to orthogonal vector
-                    t_x, t_y = self.map.w2m(wp.x + max_width * np.cos(angle), wp.y
-                                            + max_width * np.sin(angle))
-
-                    # Get the line from the waypoint to the target cell
-                    x_list, y_list, _ = line_aa(wp_x, wp_y, t_x, t_y)
-
-                    for i in range(len(x_list)):
-                        wp_xi, wp_yi = x_list[i], y_list[i]
-
-                        # Check if the cell is occupied
-                        if self._is_obstacle_occupied(wp_xi, wp_yi):
-                            # Obstacle detected
-                            continue
-
-                        # Check for occupied cells (obstacles)
-                        occupied_indices = self.map.data[y_list[i:], x_list[i:]] == 0
-
-                        if np.any(occupied_indices):
-                            # If there are obstacles, find the nearest one
-                            obstacle_index = np.argmax(occupied_indices)
-                            obstacle_x = x_list[i+obstacle_index]
-                            obstacle_y = y_list[i+obstacle_index]
-                            min_cell = obstacle_x, obstacle_y
-                            min_width = np.hypot(wp_xi - min_cell[0], wp_yi - min_cell[1]) * self.map.resolution
-                        else:
-                            min_width = max_width
-
-                        if dir == 'left':
-                            left_clear_cell = (wp_xi, wp_yi)
-                            left_min_width = min_width
-                        else:
-                            right_clear_cell = (wp_xi, wp_yi)
-                            right_min_width = min_width
-                        break
-
-                # for debug
-                if left_clear_cell is not None:
-                    x, y = self.map.m2w(left_clear_cell[0], left_clear_cell[1])
-                    self._obst_left_candidate_x.append(x)
-                    self._obst_left_candidate_y.append(y)
-                    self._left_min_width.append(left_min_width)
-                if right_clear_cell is not None:
-                    x, y = self.map.m2w(right_clear_cell[0], right_clear_cell[1])
-                    self._obst_right_candidate_x.append(x)
-                    self._obst_right_candidate_y.append(y)
-                    self._right_min_width.append(right_min_width)
-
-                # Determine the reference cell
-                choose_left = False
-                if left_clear_cell and right_clear_cell:
-                    isequal = abs(left_min_width - right_min_width) < 0.5
-                    if not isequal:
-                        # If one side is closer to the wall, choose the side with more free space
-                        # print(f"left_min_width: {left_min_width}, right_min_width: {right_min_width}")
-                        if left_min_width > right_min_width:
-                            choose_left = True
-                    elif wp_id > 0:
-                        # If both sides are equally close to the center, choose the side closer to the previous waypoint
-                        prev_wp = self.waypoints[wp_id - 1]
-                        prev_wp_x, prev_wp_y = self.map.w2m(prev_wp.x, prev_wp.y)
-                        left_dist_from_prev = dist(left_clear_cell[0], left_clear_cell[1], prev_wp_x, prev_wp_y)
-                        right_dist_from_prev = dist(right_clear_cell[0], right_clear_cell[1], prev_wp_x, prev_wp_y)
-                        # print(f"left_dist_from_prev: {left_dist_from_prev}, right_dist_from_prev: {right_dist_from_prev}")
-                        if left_dist_from_prev < right_dist_from_prev:
-                            choose_left = True
-                    else:
-                        # print("No previous waypoint to compare distances")
-                        choose_left = True
-                elif left_clear_cell:
-                    # print("Only left clear cell found")
-                    choose_left = True
-                elif right_clear_cell:
-                    # print("Only right clear cell found")
-                    pass
-                else:
-                    print("No free cell found in either direction")
-
-                if choose_left:
-                    wp_x, wp_y = left_clear_cell[0], left_clear_cell[1]
-                else:
-                    wp_x, wp_y = right_clear_cell[0], right_clear_cell[1]
-
-                # print(f"wp[{wp_id}] Choose left: {choose_left}, wp_x: {wp_x}, wp_y: {wp_y}")
-
-                # for debug
-                if left_clear_cell is not None or right_clear_cell is not None:
-                    center_x, center_y = self.map.m2w(wp_x, wp_y)
-                    self._obst_modified_center_x.append(center_x)
-                    self._obst_modified_center_y.append(center_y)
-
-            # List containing information for current waypoint
-            width_info = []
-            wp_x_w, wp_y_w = self.map.m2w(wp_x, wp_y)
-            # Check width left and right of the center-line
-            for i, dir in enumerate(['left', 'right']):
-                # Get angle orthogonal to path in current direction
-                angle = left_angle if dir == 'left' else right_angle
-
-                # Get closest cell to orthogonal vector
-                t_x, t_y = self.map.w2m(wp_x_w + max_width * np.cos(angle), wp_y_w
-                                        + max_width * np.sin(angle))
-                # Compute distance to orthogonal cell on path border
-                b_value, b_cell = self._get_min_width(wp_x, wp_y, t_x, t_y, max_width)
-
-                # Add information to list for current waypoint
-                width_info.append(b_value)
-                width_info.append(b_cell)
-
-            # Set waypoint attributes with width to the left and right
-            wp.ub = width_info[0]
-            wp.lb = -1 * width_info[2]  # minus can be assumed as waypoints
-            # represent center-line of the path
-            # Set border cells of waypoint
-            # wp.static_border_cells = (width_info[1], width_info[3])
-            # wp.dynamic_border_cells = (width_info[1], width_info[3])
-
     def _get_min_width(self, wp_x, wp_y, t_x, t_y, max_width):
         """
         Compute the minimum distance between the current waypoint and the
@@ -712,12 +543,6 @@ class ReferencePath:
             ax.plot((bl_x[-2], br_x[-2]), (bl_y[-2], br_y[-2]), color=OBSTACLE)
             ax.plot((bl_x[0], br_x[0]), (bl_y[0], br_y[0]), color=OBSTACLE)
 
-        # ax.plot(self._center_x, self._center_y, "o", color="red", markersize=2)
-        # ax.plot(self._obst_center_x, self._obst_center_y, "o", color="green", markersize=2)
-        # ax.plot(self._obst_modified_center_x, self._obst_modified_center_y, "o", color="blue", markersize=3)
-        # ax.plot(self._obst_left_candidate_x, self._obst_left_candidate_y, "o", color="purple", markersize=2)
-        # ax.plot(self._obst_right_candidate_x, self._obst_right_candidate_y, "o", color="cyan", markersize=2)
-
         # Plot dynamic path constraints
         # Get x and y locations of border cells for upper and lower bound
         if (self.border_cells.current_wp_id is not None) and \
@@ -840,6 +665,8 @@ class ReferencePath:
                     ub_pw, lb_pw = border_cells_hor[n-1]
                     ub_pw, lb_pw = list(ub_pw), list(lb_pw)
 
+                    # Calculate the area of a quadrilateral using the border cells of the previous waypoint
+                    # and the border cells of the free segment of the current waypoint
                     areas = []
                     for free_segment in free_segments:
                         ub_fs, lb_fs = free_segment
@@ -849,34 +676,7 @@ class ReferencePath:
                     ls_id = areas.index(max(areas))
                     ub_ls, lb_ls = free_segments[ls_id]
 
-                    # # Project border cells onto new waypoint in path direction
-                    # wp_prev = self.get_waypoint(wp_id+n-1)
-                    # delta_s = wp_prev - wp
-                    # ub_pw[0] += delta_s * np.cos(wp_prev.psi)
-                    # ub_pw[1] += delta_s * np.cos(wp_prev.psi)
-                    # lb_pw[0] += delta_s * np.sin(wp_prev.psi)
-                    # lb_pw[1] += delta_s * np.sin(wp_prev.psi)
-
-                    # # container for overlap of segments with projection
-                    # segment_offsets = []
-
-                    # for free_segment in free_segments:
-
-                    #     # Get border cells of segment
-                    #     ub_fs, lb_fs = free_segment
-
-                    #     # distance between upper bounds and lower bounds
-                    #     d_ub = np.sqrt((ub_fs[0]-ub_pw[0])**2 + (ub_fs[1]-ub_pw[1])**2)
-                    #     d_lb = np.sqrt((lb_fs[0]-lb_pw[0])**2 + (lb_fs[1]-lb_pw[1])**2)
-                    #     mean_dist = (d_ub + d_lb) / 2
-
-                    #     # Append offset to projected previous segment
-                    #     segment_offsets.append(mean_dist)
-
-                    # # Select segment with minimum offset to projected previous
-                    # # segment
-                    # ls_id = segment_offsets.index(min(segment_offsets))
-                    # ub_ls, lb_ls = free_segments[ls_id]
+                    # print(f"n: {n}, areas: {areas}, ls_id: {ls_id}")
 
                 # Select free segment in case of only one candidate
                 elif len(free_segments) == 1:
