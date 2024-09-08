@@ -82,7 +82,7 @@ class SimulationLogger:
                 car.show(self.axes[idx])
 
                 # Plot MPC prediction
-                mpc.show_prediction(self.axes[idx])
+                # mpc.show_prediction(self.axes[idx])
 
                 # Plot passed path
                 self.axes[idx].plot(self.init_x, self.init_y, 'b*')

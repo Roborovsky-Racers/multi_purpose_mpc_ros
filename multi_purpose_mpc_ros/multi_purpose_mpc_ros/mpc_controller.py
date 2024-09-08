@@ -526,8 +526,9 @@ class MPCController(Node):
             # self.get_logger().info(f"u: {u}")
 
             if len(u) == 0:
-                self.get_logger().error("No control signal", throttle_duration_sec=1)
-                continue
+                # self.get_logger().error("No control signal", throttle_duration_sec=1)
+                # continue
+                u = last_u
 
             acc = 0.
             bug_acc_enabled = False
@@ -566,8 +567,8 @@ class MPCController(Node):
 
 
             # 約 0.25 秒ごとに予測結果を表示
-            if loop % (self._mpc_cfg.control_rate // 4) == 0:
-                self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
+            # if loop % (self._mpc_cfg.control_rate // 4) == 0:
+            #     self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
 
 
         # show results
