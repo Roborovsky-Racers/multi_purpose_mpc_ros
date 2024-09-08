@@ -36,7 +36,7 @@ from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec, l
 from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
 from multi_purpose_mpc_ros.simulation_logger import SimulationLogger
 from multi_purpose_mpc_ros.obstacle_manager import ObstacleManager
-from multi_purpose_mpc_ros_msgs.msg import AckermannControlBoostCommand, PathConstraints
+from multi_purpose_mpc_ros_msgs.msg import AckermannControlBoostCommand, PathConstraints, BorderCells
 
 def array_to_ackermann_control_command(stamp, u: np.ndarray, acc: float) -> AckermannControlCommand:
     msg = AckermannControlCommand()
@@ -94,7 +94,7 @@ class MPCController(Node):
 
     PKG_PATH: str = get_package_share_directory('multi_purpose_mpc_ros') + "/"
     MAX_LAPS = 6
-    USE_BUG_ACC = True
+    USE_BUG_ACC = False
     BUG_VEL = 40.0 # km/h
     BUG_ACC = 400.0
 
@@ -130,6 +130,27 @@ class MPCController(Node):
         for file_path in mandatory_files:
             file_exists(self.in_pkg_share(file_path))
         return cfg
+
+    def _reconstruct_reference_path(self) -> Optional[ReferencePath]:
+        cfg_ref_path = self._cfg.reference_path # type: ignore
+        reference_path = ReferencePath(
+            self._map,
+            self._car.reference_path.org_wp_x,
+            self._car.reference_path.org_wp_y,
+            cfg_ref_path.resolution,
+            cfg_ref_path.smoothing_distance,
+            cfg_ref_path.max_width,
+            cfg_ref_path.circular)
+
+        mpc_config = self._mpc_cfg
+        speed_profile_constraints = {
+            "a_min": mpc_config.a_min, "a_max": mpc_config.a_max,
+            "v_min": 0.0, "v_max": mpc_config.v_max, "ay_max": mpc_config.ay_max}
+
+        if not reference_path.compute_speed_profile(speed_profile_constraints):
+            return None
+
+        return reference_path
 
     def _create_reference_path_from_autoware_trajectory(self, trajectory: Trajectory) -> Optional[ReferencePath]:
         wp_x = [0] * len(trajectory.points)
@@ -241,7 +262,8 @@ class MPCController(Node):
                 mpc_cfg.QN,
                 state_constraints,
                 input_constraints,
-                mpc_cfg.ay_max)
+                mpc_cfg.ay_max,
+                self._cfg.reference_path.use_path_constraints_topic)
             return mpc_cfg, mpc
 
         def compute_speed_profile(car: BicycleModel, mpc_config: MPCConfig) -> None:
@@ -299,8 +321,14 @@ class MPCController(Node):
             Trajectory, "planning/scenario_planning/trajectory", self._trajectory_callback, 1)
         self._awsim_status_sub = self.create_subscription(
             Float32MultiArray, "/aichallenge/awsim/status", self._awsim_status_callback, 1)
-        self._path_constraints_sub = self.create_subscription(
-            PathConstraints, "/path_constraints_provider/path_constraints", self._path_constraints_callback, 1)
+
+        if self._cfg.reference_path.use_path_constraints_topic: # type: ignore
+            self._path_constraints_sub = self.create_subscription(
+                PathConstraints, "/path_constraints_provider/path_constraints", self._path_constraints_callback, 1)
+
+        if self._cfg.reference_path.use_border_cells_topic: # type: ignore
+            self._border_cells_sub = self.create_subscription(
+                BorderCells, "/path_constraints_provider/border_cells", self._border_cells_callback, 1)
 
     def _odom_callback(self, msg: Odometry) -> None:
         self._odom = msg
@@ -328,6 +356,10 @@ class MPCController(Node):
     def _path_constraints_callback(self, msg: PathConstraints):
         self._reference_path.set_path_constraints(
             msg.upper_bounds, msg.lower_bounds, msg.rows, msg.cols)
+
+    def _border_cells_callback(self, msg: BorderCells):
+        self._reference_path.set_border_cells(
+            msg.dynamic_upper_bounds, msg.dynamic_lower_bounds, msg.rows, msg.cols)
 
     def _trajectory_callback(self, msg):
         self._trajectory = msg
@@ -435,7 +467,7 @@ class MPCController(Node):
 
         self._wait_until_clock_received()
         self._wait_until_odom_received()
-        self._wait_until_control_mode_request_received()
+        # self._wait_until_control_mode_request_received()
         self._wait_until_aw_sim_status_received()
         self._wait_until_trajectory_received()
         self._wait_until_path_constraints_received()
@@ -444,7 +476,6 @@ class MPCController(Node):
 
         pose = odom_to_pose_2d(self._odom) # type: ignore
         self._car.update_states(pose.x, pose.y, pose.theta)
-
         self._car.update_reference_path(self._car.reference_path)
 
         sim_logger = SimulationLogger(
@@ -556,8 +587,8 @@ class MPCController(Node):
 
 
             # 約 0.25 秒ごとに予測結果を表示
-            if loop % (self._mpc_cfg.control_rate // 4) == 0:
-                self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
+            # if loop % (self._mpc_cfg.control_rate // 4) == 0:
+            #     self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
 
 
         # show results
