@@ -7,6 +7,7 @@ from skimage.draw import line_aa
 import matplotlib.pyplot as plt
 from scipy import sparse
 import osqp
+import itertools
 
 # Colors
 DRIVABLE_AREA = '#BDC3C7'
@@ -157,6 +158,8 @@ class ReferencePath:
 
         self.path_constraints: Optional[List[np.ndarray]] = None
         self.border_cells = BorderCells()
+
+        self.COUNT = 0
 
     def set_path_constraints(self, upper_bounds: List[float], lower_bounds: List[float], n_rows, n_cols) -> None:
         self.path_constraints = [
@@ -565,6 +568,11 @@ class ReferencePath:
         ax.plot(wp_ub_x[0:-1], wp_ub_y[0:-1], c=PATH_CONSTRAINTS)
         ax.plot(wp_lb_x[0:-1], wp_lb_y[0:-1], c=PATH_CONSTRAINTS)
 
+        for rects in self.rect_points:
+            COLOR = ['red', 'blue', 'green', 'yellow']
+            for i, rect_points in enumerate(rects):
+                ax.plot(rect_points[:,0], rect_points[:,1], "o-", color=COLOR[i], markersize=1, linewidth=1)
+
         # Plot obstacles
         # for obstacle in self.map.obstacles:
         #     obstacle.show(ax=ax)
@@ -641,52 +649,7 @@ class ReferencePath:
         border_cells_hor = []
         border_cells_hor_sm = []
 
-        # Iterate over horizon
-        for n in range(N):
-
-            # get corresponding waypoint
-            wp = self.get_waypoint(wp_id+n)
-
-            # Get list of free segments
-            free_segments = self._compute_free_segments(wp, min_width)
-
-            # First waypoint in horizon uses largest segment
-            if n == 0:
-                segment_lengths = [np.sqrt((seg[0][0]-seg[1][0])**2 +
-                            (seg[0][1]-seg[1][1])**2) for seg in free_segments]
-                ls_id = segment_lengths.index(max(segment_lengths))
-                ub_ls, lb_ls = free_segments[ls_id]
-
-            else:
-                # Iterate over free segments for current waypoint
-                if len(free_segments) >= 2:
-
-                    # Get border cells of selected segment at previous waypoint
-                    ub_pw, lb_pw = border_cells_hor[n-1]
-                    ub_pw, lb_pw = list(ub_pw), list(lb_pw)
-
-                    # Calculate the area of a quadrilateral using the border cells of the previous waypoint
-                    # and the border cells of the free segment of the current waypoint
-                    areas = []
-                    for free_segment in free_segments:
-                        ub_fs, lb_fs = free_segment
-                        areas.append(calculate_area([ub_fs, lb_fs, lb_pw, ub_pw]))
-
-                    # Select segment with maximum area segment
-                    ls_id = areas.index(max(areas))
-                    ub_ls, lb_ls = free_segments[ls_id]
-
-                    # print(f"n: {n}, areas: {areas}, ls_id: {ls_id}")
-
-                # Select free segment in case of only one candidate
-                elif len(free_segments) == 1:
-                    ub_ls, lb_ls = free_segments[0]
-
-                # Set waypoint coordinates as bound cells if no feasible
-                # segment available
-                else:
-                    ub_ls, lb_ls = (wp.x, wp.y), (wp.x, wp.y)
-
+        def add_constraint(wp, ub_ls, lb_ls):
             # Check sign of upper and lower bound
             angle_ub = np.mod(np.arctan2(ub_ls[1] - wp.y, ub_ls[0] - wp.x)
                                   - wp.psi + math.pi, 2 * math.pi) - math.pi
@@ -737,6 +700,99 @@ class ReferencePath:
 
             # Assign dynamic border cells to waypoints
             wp.dynamic_border_cells = bound_cells_sm
+
+
+        self.rect_points = []
+
+        self.COUNT += 1
+        show = False
+        if self.COUNT == 100:
+            show = True
+            self.COUNT = 0
+
+        # compute free segments for each waypoints in horizon
+        free_segments_hor = []
+        for n in range(N):
+            wp = self.get_waypoint(wp_id+n)
+            free_segments = self._compute_free_segments(wp, min_width)
+            free_segments_hor.append(free_segments)
+
+        # Iterate over horizon
+        n = 0
+        while n < N:
+
+            # get corresponding waypoint
+            wp = self.get_waypoint(wp_id+n)
+
+            # Get list of free segments
+            free_segments = free_segments_hor[n]
+
+            # Iterate over free segments for current waypoint
+            if len(free_segments) >= 2:
+                ub_pw, lb_pw = border_cells_hor[n-1]
+                ub_pw, lb_pw = list(ub_pw), list(lb_pw)
+
+                free_segments_indices = [[idx for idx in range(len(free_segments))]]
+                for i in range(n+1, n+5):
+                    if i >= N:
+                        break
+                    free_segments = free_segments_hor[i]
+                    if len(free_segments) == 0:
+                      break
+                    else:
+                      free_segments_indices.append([idx for idx in range(len(free_segments))])
+
+                free_segments_indices_combinations = itertools.product(*free_segments_indices)
+                if show:
+                    print(f"n :{n}, free_segments_indices: {free_segments_indices}")
+
+                def calculate_combination_total_area(index_combination, ub_pw, lb_pw):
+                    total_area = 0.0
+                    for i, segment_index in enumerate(index_combination):
+                        ub_fs, lb_fs = free_segments_hor[n+i][segment_index]
+                        total_area += calculate_area([ub_fs, lb_fs, lb_pw, ub_pw])
+                        ub_pw, lb_pw = ub_fs, lb_fs
+                    return total_area
+
+                combination_areas = []
+                combination_indices = []
+                for combination in free_segments_indices_combinations:
+                    total_area = calculate_combination_total_area(combination, ub_pw, lb_pw)
+                    combination_areas.append(total_area)
+                    combination_indices.append(combination)
+
+                max_area = max(combination_areas)
+                max_area_index = combination_areas.index(max_area)
+                max_area_combination_indices = combination_indices[max_area_index]
+
+                if show:
+                    print(f"max_area_combination_indices: {max_area_combination_indices}")
+                # max_area_combination_indices = (1,0)
+
+                for i in max_area_combination_indices:
+                    wp = self.get_waypoint(wp_id+n)
+                    ub_ls, lb_ls = free_segments_hor[n][i]
+                    add_constraint(wp, ub_ls, lb_ls)
+                    n += 1
+
+                if show:
+                    print(f"n: {n}, combination_areas: {combination_areas}, combination_indices: {combination_indices}")
+
+            # Select free segment in case of only one candidate
+            elif len(free_segments) == 1:
+                ub_ls, lb_ls = free_segments[0]
+                add_constraint(wp, ub_ls, lb_ls)
+                n += 1  # increment waypoint index
+
+            # Set waypoint coordinates as bound cells if no feasible
+            # segment available
+            else:
+                ub_ls, lb_ls = (wp.x, wp.y), (wp.x, wp.y)
+                add_constraint(wp, ub_ls, lb_ls)
+                n += 1  # increment waypoint index
+
+        if show:
+            print(f"ub_hor: {ub_hor}, lb_hor: {lb_hor}")
 
         return np.array(ub_hor), np.array(lb_hor), np.array(border_cells_hor_sm)
 
