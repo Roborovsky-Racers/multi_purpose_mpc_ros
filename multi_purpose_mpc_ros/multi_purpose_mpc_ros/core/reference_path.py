@@ -568,6 +568,9 @@ class ReferencePath:
         ax.plot(wp_ub_x[0:-1], wp_ub_y[0:-1], c=PATH_CONSTRAINTS)
         ax.plot(wp_lb_x[0:-1], wp_lb_y[0:-1], c=PATH_CONSTRAINTS)
 
+        for seg in self.free_segs:
+            ax.plot([seg[0][0], seg[1][0]], [seg[0][1], seg[1][1]], "o-", c='blue', markersize=2, linewidth=1)
+
         # self.cols = np.array(self.cols)
         # print(len(self.cols))
         # for i, cols in enumerate(self.upper_cols):
@@ -709,6 +712,7 @@ class ReferencePath:
         self.rect_points = []
         self.upper_cols = []
         self.lower_cols = []
+        self.free_segs = []
 
         # self.COUNT += 1
         # show = False
@@ -722,6 +726,7 @@ class ReferencePath:
             wp = self.get_waypoint(wp_id+n)
             free_segments = self._compute_free_segments(wp, min_width)
             free_segments_hor.append(free_segments)
+            self.free_segs.extend(free_segments)
 
         # Iterate over horizon
         n = 0
@@ -750,7 +755,8 @@ class ReferencePath:
                 #     print(f"n :{n}, free_segments_indices: {free_segments_indices}")
 
                 def calculate_combination_total_area(index_combination, ub_pw, lb_pw):
-                    total_area = 0.0
+                    # total_area = 0.0
+                    total_area = dist(ub_pw[0], ub_pw[1], lb_pw[0], lb_pw[1])
 
                     for i, segment_index in enumerate(index_combination):
                         ub_fs, lb_fs = free_segments_hor[n+i][segment_index]
@@ -773,7 +779,9 @@ class ReferencePath:
                             self.upper_cols.append([[mean_prev[0], mean_fs[0]], [mean_prev[1], mean_fs[1]]])
                             return -1000000.0 # penalty because has collision!
 
-                        total_area += calculate_area([ub_fs, lb_fs, lb_pw, ub_pw])
+                        # total_area += calculate_area([ub_fs, lb_fs, lb_pw, ub_pw])
+                        total_area += dist(ub_fs[0], ub_fs[1], lb_fs[0], lb_fs[1])
+                        # total_area += dist(ub_pw[0], ub_pw[1], lb_pw[0], lb_pw[1])
                         ub_pw = ub_fs
                         lb_pw = lb_fs
 
