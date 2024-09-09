@@ -121,6 +121,7 @@ class MPC:
             min_width = 2 * self.model.safety_margin
             ub, lb, _ = self.model.reference_path.update_path_constraints(
                 self.model.wp_id + 1,
+                [self.model.temporal_state.x, self.model.temporal_state.y, self.model.temporal_state.psi],
                 N,
                 min_width,
                 self.model.safety_margin)

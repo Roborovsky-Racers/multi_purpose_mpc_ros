@@ -69,7 +69,7 @@ def launch_setup(context, *args, **kwargs):
     return [
         mpc_controller,
         boost_commander,
-        path_constraints_provider
+        # path_constraints_provider
     ]
 
 

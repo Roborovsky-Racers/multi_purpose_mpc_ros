@@ -25,12 +25,12 @@ reference_path:
   smoothing_distance: 3
   max_width: 5.0
   circular: true
-  use_path_constraints_topic: true
-  use_border_cells_topic: true
+  use_path_constraints_topic: false
+  use_border_cells_topic: false
 
 bicycle_model:
   length: 1.087
-  width: 1.35
+  width: 1.45
 
 mpc:
   N: 20

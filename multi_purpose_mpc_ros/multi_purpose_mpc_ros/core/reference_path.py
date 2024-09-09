@@ -568,8 +568,11 @@ class ReferencePath:
         ax.plot(wp_ub_x[0:-1], wp_ub_y[0:-1], c=PATH_CONSTRAINTS)
         ax.plot(wp_lb_x[0:-1], wp_lb_y[0:-1], c=PATH_CONSTRAINTS)
 
-        for seg in self.free_segs:
-            ax.plot([seg[0][0], seg[1][0]], [seg[0][1], seg[1][1]], "o-", c='blue', markersize=2, linewidth=1)
+        # for seg in self.free_segs:
+        #     ax.plot([seg[0][0], seg[1][0]], [seg[0][1], seg[1][1]], "o-", c='blue', markersize=2, linewidth=1)
+
+        # for seg in self.select_free_segs:
+        #     ax.plot([seg[0][0], seg[1][0]], [seg[0][1], seg[1][1]], "o-", c='red', markersize=2, linewidth=1)
 
         # self.cols = np.array(self.cols)
         # print(len(self.cols))
@@ -644,7 +647,7 @@ class ReferencePath:
 
         return free_segments
 
-    def update_path_constraints(self, wp_id, N, min_width, safety_margin):
+    def update_path_constraints(self, wp_id, pose, N, min_width, safety_margin):
         """
         Compute upper and lower bounds of the drivable area orthogonal to
         the given waypoint.
@@ -657,6 +660,8 @@ class ReferencePath:
         border_cells_hor_sm = []
 
         def add_constraint(wp, ub_ls, lb_ls):
+            self.select_free_segs.append([ub_ls, lb_ls])
+
             # Check sign of upper and lower bound
             angle_ub = np.mod(np.arctan2(ub_ls[1] - wp.y, ub_ls[0] - wp.x)
                                   - wp.psi + math.pi, 2 * math.pi) - math.pi
@@ -713,6 +718,7 @@ class ReferencePath:
         self.upper_cols = []
         self.lower_cols = []
         self.free_segs = []
+        self.select_free_segs = []
 
         # self.COUNT += 1
         # show = False
@@ -754,23 +760,22 @@ class ReferencePath:
                 # if show:
                 #     print(f"n :{n}, free_segments_indices: {free_segments_indices}")
 
-                def calculate_combination_total_area(index_combination, ub_pw, lb_pw):
-                    # total_area = 0.0
-                    total_area = dist(ub_pw[0], ub_pw[1], lb_pw[0], lb_pw[1])
+                def calculate_combination_total_segment_length(index_combination, ub_pw, lb_pw):
+                    def has_collision(p0, p1):
+                        p0m = self.map.w2m(p0[0], p0[1])
+                        p1m = self.map.w2m(p1[0], p1[1])
+                        x_list, y_list, _ = line_aa(p0m[0], p0m[1], p1m[0], p1m[1])
+
+                        occupied_indices = self.map.data[y_list, x_list] == 0
+                        if np.any(occupied_indices):
+                            return True
+                        else:
+                            return False
+
+                    total_segment_length = 0.0
 
                     for i, segment_index in enumerate(index_combination):
                         ub_fs, lb_fs = free_segments_hor[n+i][segment_index]
-
-                        def has_collision(p0, p1):
-                            p0m = self.map.w2m(p0[0], p0[1])
-                            p1m = self.map.w2m(p1[0], p1[1])
-                            x_list, y_list, _ = line_aa(p0m[0], p0m[1], p1m[0], p1m[1])
-
-                            occupied_indices = self.map.data[y_list, x_list] == 0
-                            if np.any(occupied_indices):
-                                return True
-                            else:
-                                return False
 
                         mean_prev = (np.array(ub_pw) + np.array(lb_pw)) / 2.
                         mean_fs = (np.array(ub_fs) + np.array(lb_fs)) / 2.
@@ -779,32 +784,30 @@ class ReferencePath:
                             self.upper_cols.append([[mean_prev[0], mean_fs[0]], [mean_prev[1], mean_fs[1]]])
                             return -1000000.0 # penalty because has collision!
 
-                        # total_area += calculate_area([ub_fs, lb_fs, lb_pw, ub_pw])
-                        total_area += dist(ub_fs[0], ub_fs[1], lb_fs[0], lb_fs[1])
-                        # total_area += dist(ub_pw[0], ub_pw[1], lb_pw[0], lb_pw[1])
+                        total_segment_length += dist(ub_fs[0], ub_fs[1], lb_fs[0], lb_fs[1])
                         ub_pw = ub_fs
                         lb_pw = lb_fs
 
-                    return total_area
+                    return total_segment_length
 
-                combination_areas = []
+                combination_segment_length = []
                 combination_indices = []
                 for combination in free_segments_indices_combinations:
                     if n > 0:
                         ub_pw, lb_pw = border_cells_hor[n-1]
                     else:
-                        ub_pw, lb_pw =  free_segments_hor[n][combination[0]]
-                    total_area = calculate_combination_total_area(combination, ub_pw, lb_pw)
-                    combination_areas.append(total_area)
+                        ub_pw, lb_pw =  [pose[0], pose[1]], [pose[0], pose[1]]
+                    total_segment_length = calculate_combination_total_segment_length(combination, ub_pw, lb_pw)
+                    combination_segment_length.append(total_segment_length)
                     combination_indices.append(combination)
 
-                max_area = max(combination_areas)
-                max_area_index = combination_areas.index(max_area)
+                max_area = max(combination_segment_length)
+                max_area_index = combination_segment_length.index(max_area)
                 max_area_combination_indices = combination_indices[max_area_index]
 
                 # if show:
                 #     print(f"max_area_combination_indices: {max_area_combination_indices}")
-                #     print(f"n: {n}, combination_areas: {combination_areas}, combination_indices: {combination_indices}")
+                #     print(f"n: {n}, combination_segment_length: {combination_segment_length}, combination_indices: {combination_indices}")
 
                 for i in max_area_combination_indices:
                     wp = self.get_waypoint(wp_id+n)

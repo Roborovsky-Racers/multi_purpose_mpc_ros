@@ -527,7 +527,8 @@ class MPCController(Node):
 
             if len(u) == 0:
                 self.get_logger().error("No control signal", throttle_duration_sec=1)
-                continue
+                u = [0.0, 0.0]
+                # continue
 
             acc = 0.
             bug_acc_enabled = False
