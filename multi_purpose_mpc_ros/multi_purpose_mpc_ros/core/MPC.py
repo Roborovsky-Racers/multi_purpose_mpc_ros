@@ -118,12 +118,12 @@ class MPC:
 
         # Update path constraints
         if not self.use_path_constraints_topic:
-            min_width = 2 * self.model.safety_margin
             ub, lb, _ = self.model.reference_path.update_path_constraints(
                 self.model.wp_id + 1,
                 [self.model.temporal_state.x, self.model.temporal_state.y, self.model.temporal_state.psi],
                 N,
-                min_width,
+                self.model.length,
+                self.model.width,
                 self.model.safety_margin)
         else:
             ub = self.model.reference_path.path_constraints[0][self.model.wp_id]

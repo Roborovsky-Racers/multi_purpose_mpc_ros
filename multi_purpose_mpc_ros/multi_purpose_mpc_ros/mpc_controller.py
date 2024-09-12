@@ -294,6 +294,7 @@ class MPCController(Node):
             Odometry, "/localization/kinematic_state", self._odom_callback, 1)
         self._obstacles_sub = self.create_subscription(
             Float64MultiArray, "/aichallenge/objects", self._obstacles_callback, 1)
+            # Float64MultiArray, "/aichallenge/objects2", self._obstacles_callback, 1)
         self._control_mode_request_sub = self.create_subscription(
             Bool, "control/control_mode_request_topic", self._control_mode_request_callback, 1)
         self._trajectory_sub = self.create_subscription(
@@ -466,6 +467,8 @@ class MPCController(Node):
         loop = 0
         kp = 100.0
         last_u = np.array([0.0, 0.0])
+
+        self._current_laps = 1
 
         # for i in range(10):
         #     self._obstacle_manager.push_next_obstacle()

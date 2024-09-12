@@ -216,7 +216,6 @@ class PathConstraintsProvider(Node):
 
     def run(self) -> None:
 
-        min_width = self._car.safety_margin * 2.0
         self._path_constraints = PathConstraints()
         self._path_constraints.cols = self._mpc_cfg.N
         self._path_constraints.rows = self._reference_path.n_waypoints - 1
@@ -239,7 +238,8 @@ class PathConstraintsProvider(Node):
                     self._map.add_obstacles(self._obstacles)
 
                 ub_hor, lb_hor, border_cells_hor_sm = self._car.reference_path.update_path_constraints(
-                    wp_id + 1, self._mpc_cfg.N, min_width, self._car.safety_margin
+                    wp_id + 1, self._mpc_cfg.N,
+                    self._car.length, self._car.width, self._car.safety_margin
                 )
                 self._path_constraints.upper_bounds.extend(ub_hor)
                 self._path_constraints.lower_bounds.extend(lb_hor)

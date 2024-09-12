@@ -569,7 +569,7 @@ class ReferencePath:
         ax.plot(wp_lb_x[0:-1], wp_lb_y[0:-1], c=PATH_CONSTRAINTS)
 
         # for seg in self.free_segs:
-        #     ax.plot([seg[0][0], seg[1][0]], [seg[0][1], seg[1][1]], "o-", c='blue', markersize=2, linewidth=1)
+        #     ax.plot([seg[0][0], seg[1][0]], [seg[0][1], seg[1][1]], "o-", c='blue', markersize=2, linewidth=2)
 
         # for seg in self.select_free_segs:
         #     ax.plot([seg[0][0], seg[1][0]], [seg[0][1], seg[1][1]], "o-", c='red', markersize=2, linewidth=1)
@@ -647,11 +647,14 @@ class ReferencePath:
 
         return free_segments
 
-    def update_path_constraints(self, wp_id, pose, N, min_width, safety_margin):
+    def update_path_constraints(self, wp_id, pose, N, model_length, model_width, safety_margin):
         """
         Compute upper and lower bounds of the drivable area orthogonal to
         the given waypoint.
         """
+
+        # min_width = model_width / 2.0
+        min_width = 2.0 * safety_margin
 
         # container for constraints and border cells
         ub_hor = []
@@ -659,9 +662,7 @@ class ReferencePath:
         border_cells_hor = []
         border_cells_hor_sm = []
 
-        def add_constraint(wp, ub_ls, lb_ls):
-            self.select_free_segs.append([ub_ls, lb_ls])
-
+        def add_constraint(wp, ub_ls, lb_ls, more_safety_rate=1.5):
             # Check sign of upper and lower bound
             angle_ub = np.mod(np.arctan2(ub_ls[1] - wp.y, ub_ls[0] - wp.x)
                                   - wp.psi + math.pi, 2 * math.pi) - math.pi
@@ -676,15 +677,31 @@ class ReferencePath:
             lb = sign_lb * np.sqrt(
                     (lb_ls[0] - wp.x) ** 2 + (lb_ls[1] - wp.y) ** 2)
 
+            updated_safety_margin = safety_margin
+
+            segment_length = ub - lb
+            # print(f"min_width: {min_width}, safety_margin: {safety_margin}, segment_length: {segment_length}")
+            if segment_length < 2.0 * safety_margin:
+                updated_safety_margin = min_width
+            elif segment_length > 2.0 * more_safety_rate * safety_margin:
+                updated_safety_margin = more_safety_rate * safety_margin
+
             # Subtract safety margin
-            ub -= safety_margin
-            lb += safety_margin
+            ub -= updated_safety_margin
+            lb += updated_safety_margin
 
             # Check feasibility of the path
             if ub < lb:
                 # Upper and lower bound of 0 indicate an infeasible path
-                # given the specified safety margin
-                ub, lb = 0.0, 0.0
+                print("Infeasible path detected!")
+                print(f"Waypoint: {wp_id}, n: {n}, Upper bound: {ub}, Lower bound: {lb}")
+                print(f"min_width: {min_width}, safety_margin: {safety_margin}, segment_length: {segment_length}")
+                # ub, lb = 0.0, 0.0
+                ub = +min_width
+                lb = -min_width
+            # else:
+            #     self.select_free_segs.append([ub_ls, lb_ls])
+            # self.select_free_segs.append([ub_ls, lb_ls])
 
             # Compute absolute angle of bound cell
             angle_ub = np.mod(math.pi / 2 + wp.psi + math.pi,
@@ -697,10 +714,12 @@ class ReferencePath:
             lb_ls = wp.x - lb * np.cos(angle_lb), wp.y - lb * np.sin(
                     angle_lb)
             bound_cells_sm = (ub_ls, lb_ls)
+            self.select_free_segs.append([ub_ls, lb_ls])
+
             # Compute cell on bound for computed distance ub and lb
-            ub_ls = wp.x + (ub + safety_margin) * np.cos(angle_ub), wp.y + (ub + safety_margin) * np.sin(
+            ub_ls = wp.x + (ub + updated_safety_margin) * np.cos(angle_ub), wp.y + (ub + updated_safety_margin) * np.sin(
                 angle_ub)
-            lb_ls = wp.x - (lb - safety_margin) * np.cos(angle_lb), wp.y - (lb - safety_margin) * np.sin(
+            lb_ls = wp.x - (lb - updated_safety_margin) * np.cos(angle_lb), wp.y - (lb - updated_safety_margin) * np.sin(
                 angle_lb)
             bound_cells = (ub_ls, lb_ls)
 
@@ -824,8 +843,21 @@ class ReferencePath:
             # Set waypoint coordinates as bound cells if no feasible
             # segment available
             else:
+                print(f"No feasible free segment found! wp_id: {wp_id}, n: {n}")
                 ub_ls, lb_ls = (wp.x, wp.y), (wp.x, wp.y)
+
+                # left_angle = np.mod(wp.psi + math.pi / 2 + math.pi,
+                #                  2 * math.pi) - math.pi
+                # right_angle = np.mod(wp.psi - math.pi / 2 + math.pi,
+                #                    2 * math.pi) - math.pi
+
+                # ub_ls = (wp.x + min_width * np.cos(left_angle),
+                #          wp.y + min_width * np.sin(left_angle))
+                # lb_ls = (wp.x + min_width * np.cos(right_angle),
+                #          wp.y + min_width * np.sin(right_angle))
+
                 add_constraint(wp, ub_ls, lb_ls)
+
                 n += 1  # increment waypoint index
 
         # if show:
