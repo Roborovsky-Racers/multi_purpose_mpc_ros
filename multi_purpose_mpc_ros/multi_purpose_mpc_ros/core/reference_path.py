@@ -902,27 +902,31 @@ class ReferencePath:
         # border_cells_smの連続する点を直線で結び、前後の直線がなす角がしきい値より大きい場合、
         # 間の点を一つ飛ばして直線を引きなおすようにborder_cells_smを更新する
         ANGLE_TH = np.deg2rad(45.0)
-        for n in reversed(range(2, N)):
-            ub0 = border_cells_hor_sm[n][0]
-            ub1 = border_cells_hor_sm[n-1][0]
-            ub2 = border_cells_hor_sm[n-2][0]
-            lb0 = border_cells_hor_sm[n][1]
-            lb1 = border_cells_hor_sm[n-1][1]
-            lb2 = border_cells_hor_sm[n-2][1]
+        SEARCH_HORIZON = 3  # >=1
 
-            bound_cells_sm1 = [ub1, lb1]
+        for n in reversed(range(SEARCH_HORIZON, N-SEARCH_HORIZON+1)):
+            mid_index = n
+            waypoint_mid = self.get_waypoint(wp_id+n)
+            wp_mid = (waypoint_mid.x, waypoint_mid.y)
+            new_border_cells_hor_sm_mid = [border_cells_hor_sm[mid_index][0], border_cells_hor_sm[mid_index][1]]
 
-            waypoint1 = self.get_waypoint(wp_id+n-1)
-            wp1 = (waypoint1.x, waypoint1.y)
-
-            angle_ub = calculate_angle(ub0, ub1, ub2)
-            angle_lb = calculate_angle(lb0, lb1, lb2)
-            # print(f"n: {n}, angle_ub: {np.rad2deg(angle_ub)}, angle_lb: {np.rad2deg(angle_lb)}")
+            before_indeices = []
+            after_indices = []
+            for i in range(1, SEARCH_HORIZON+1):
+                before_index = mid_index - i
+                after_index = mid_index + i
+                if before_index >= 0:
+                    before_indeices.append(before_index)
+                if after_index < N:
+                    after_indices.append(after_index)
+            # print(f"n: {n}, before_indeices: {before_indeices}, after_indices: {after_indices}")
+            border_cell_indices_combinations = list(itertools.product(before_indeices, after_indices))
+            # print(f"n: {n}, border_cell_indices_combinations: {border_cell_indices_combinations}")
 
             def validate_intersection(old_bound_cell, new_bound_cell, bound_sign):
                 # boundが安全寄りになっている場合のみ更新を許可
-                old_bound = bound_sign * compute_bound(waypoint1, old_bound_cell)
-                new_bound = bound_sign * compute_bound(waypoint1, new_bound_cell)
+                old_bound = bound_sign * compute_bound(waypoint_mid, old_bound_cell)
+                new_bound = bound_sign * compute_bound(waypoint_mid, new_bound_cell)
                 if new_bound > old_bound:
                     # print(f"n: {n} has invalid bound! old: {old_bound}, new: {new_bound}")
                     return False
@@ -935,31 +939,41 @@ class ReferencePath:
 
                 return True
 
-            if np.abs(angle_ub) > ANGLE_TH:
-                # 前後のborder_cellを結んだ直線と、間のwpとborder_cellを結んだ直線の交点を求める
-                new_ub1 = calculate_intersection(wp1, ub1, ub0, ub2)
+            for dir in ['upper', 'lower']:
+                index = 0 if dir == 'upper' else 1
+                bound_sign = 1 if dir == 'upper' else -1
+                bound_hor = ub_hor if dir == 'upper' else lb_hor
+                border_cell_mid = border_cells_hor_sm[mid_index][index]
 
-                # 交点が安全寄りで、干渉なしであれば更新する
-                # print(f"n: {n}, angle_ub: {angle_ub}, new_ub1: {new_ub1}")
-                if validate_intersection(ub1, new_ub1, 1.0):
+                def try_update_border_cell_for_safety(border_cell_before, border_cell_after, is_nearest_pair: bool):
+                    angle = calculate_angle(border_cell_before, border_cell_mid, border_cell_after)
+
+                    if np.abs(angle) < ANGLE_TH:
+                        return True if is_nearest_pair else False
+
+                    # 前後のborder_cellを結んだ直線と、間のwpとborder_cellを結んだ直線の交点を求める
+                    new_border_cell_mid = calculate_intersection(wp_mid, border_cell_mid, border_cell_before, border_cell_after)
+
+                    # 交点が安全寄りで、干渉なしであれば更新する
+                    # print(f"n: {n}, angle_ub: {angle_ub}, new_ub1: {new_ub1}")
+                    if not validate_intersection(border_cell_mid, new_border_cell_mid, bound_sign):
+                        return False
+
                     # self.modified_ub.append([ub0, new_ub1])
                     # self.modified_ub.append([new_ub1, ub2])
-                    ub_hor[n-1] = compute_bound(waypoint1, new_ub1)
-                    bound_cells_sm1[0] = new_ub1
+                    bound_hor[mid_index] = compute_bound(waypoint_mid, new_border_cell_mid)
+                    new_border_cells_hor_sm_mid[index] = new_border_cell_mid
 
-            if np.abs(angle_lb) > ANGLE_TH:
-                new_lb1 = calculate_intersection(wp1, lb1, lb0, lb2)
+                    return True
 
-                # print(f"n: {n}, angle_lb: {angle_lb}, new_lb1: {new_lb1}")
-                if validate_intersection(lb1, new_lb1, -1.0):
-                    # self.modified_lb.append([lb0, new_lb1])
-                    # self.modified_lb.append([new_lb1, lb2])
-                    lb_hor[n-1] = compute_bound(waypoint1, new_lb1)
-                    bound_cells_sm1[1] = new_lb1
+                for i, (before_index, after_index) in enumerate(border_cell_indices_combinations):
+                    is_nearest_pair = (i == 0)
+                    if try_update_border_cell_for_safety(border_cells_hor_sm[before_index][index], border_cells_hor_sm[after_index][index], is_nearest_pair):
+                        break
 
             # update border cells (border_cells_horは以降使用しないので更新不要)
-            border_cells_hor_sm[n-1] = bound_cells_sm1
-            waypoint1.dynamic_border_cells = tuple(bound_cells_sm1)
+            border_cells_hor_sm[mid_index] = new_border_cells_hor_sm_mid
+            waypoint_mid.dynamic_border_cells = tuple(new_border_cells_hor_sm_mid)
 
         return np.array(ub_hor), np.array(lb_hor), np.array(border_cells_hor_sm)
 
