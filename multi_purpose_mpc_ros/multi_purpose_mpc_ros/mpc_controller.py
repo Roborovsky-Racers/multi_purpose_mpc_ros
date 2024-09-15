@@ -272,7 +272,7 @@ class MPCController(Node):
         self._lap_times = [None] * (self.MAX_LAPS + 1) # +1 means include lap 0
 
         # condition
-        self._last_condition = 0
+        self._last_condition = None
         self._last_colliding_time = None
 
     def _setup_pub_sub(self) -> None:
@@ -366,6 +366,9 @@ class MPCController(Node):
         self._last_lap_time = lap_time
 
     def _condition_callback(self, msg: Int32):
+        if self._last_condition is None:
+            self._last_condition = msg.data
+
         diff_condition = msg.data - self._last_condition
         if diff_condition > 30.0:
             self._last_colliding_time = self.get_clock().now()
