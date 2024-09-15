@@ -657,7 +657,10 @@ class ReferencePath:
 
         # min_width = model_width / np.sqrt(2)
         # min_width = model_width
-        min_width = 2.0 * safety_margin
+        # min_width = 2.0 * safety_margin
+        min_width = model_width
+        # min_segment_length = model_width / 4.0
+        min_segment_length = 0.1
 
         # container for constraints and border cells
         ub_hor = []
@@ -684,7 +687,7 @@ class ReferencePath:
             segment_length_sm = segment_length - 2.0 * safety_margin
 
             # Check feasibility of the path
-            if segment_length_sm < min_width:
+            if segment_length_sm < min_segment_length:
                 left_angle = np.mod(wp.psi + math.pi / 2 + math.pi,
                                  2 * math.pi) - math.pi
                 right_angle = np.mod(wp.psi - math.pi / 2 + math.pi,
@@ -694,9 +697,7 @@ class ReferencePath:
                 #                         + max_width * np.sin(angle))
 
                 print("Infeasible path detected!")
-                print(f"Waypoint: {wp_id}, n: {n}, Upper bound: {ub}, Lower bound: {lb}, WP ub: {wp.ub}, WP lb: {wp.lb}")
-                print(f"ub_ls: {ub_ls}, lb_ls: {lb_ls}, static cells {wp.static_border_cells}")
-                print(f"angle_ub: {angle_ub}, angle_lb: {angle_lb}, left_angle: {left_angle}, right_angle: {right_angle}")
+                print(f"Waypoint: {wp_id}, n: {n}, Upper bound: {ub}")
                 print(f"min_width: {min_width}, safety_margin: {safety_margin}, segment_length: {segment_length}, segment_length_sm: {segment_length_sm}")
                 (ub, lb) = (wp.ub, wp.lb)
                 # print(f"Updated Upper bound: {wp.ub}, Updated Lower bound: {wp.lb}")
