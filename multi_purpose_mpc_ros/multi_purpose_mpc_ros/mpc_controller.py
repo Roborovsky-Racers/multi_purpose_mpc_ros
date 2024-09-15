@@ -17,7 +17,7 @@ from rclpy.parameter import Parameter
 from visualization_msgs.msg import Marker, MarkerArray
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 
-from std_msgs.msg import Bool, Float32MultiArray, Float64MultiArray
+from std_msgs.msg import Bool, Float32MultiArray, Float64MultiArray, Int32
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Quaternion, Pose2D, Point
 
@@ -271,6 +271,10 @@ class MPCController(Node):
         self._last_lap_time = 0.0
         self._lap_times = [None] * (self.MAX_LAPS + 1) # +1 means include lap 0
 
+        # condition
+        self._last_condition = 0
+        self._last_colliding_time = None
+
     def _setup_pub_sub(self) -> None:
         # Publishers
         self._command_pub = self.create_publisher(
@@ -301,6 +305,8 @@ class MPCController(Node):
             Trajectory, "planning/scenario_planning/trajectory", self._trajectory_callback, 1)
         self._awsim_status_sub = self.create_subscription(
             Float32MultiArray, "/aichallenge/awsim/status", self._awsim_status_callback, 1)
+        self._condition_sub = self.create_subscription(
+            Int32, "/aichallenge/pitstop/condition", self._condition_callback, 1)
 
         if self._cfg.reference_path.use_path_constraints_topic: # type: ignore
             self._path_constraints_sub = self.create_subscription(
@@ -358,6 +364,13 @@ class MPCController(Node):
             self._current_laps = laps
 
         self._last_lap_time = lap_time
+
+    def _condition_callback(self, msg: Int32):
+        diff_condition = msg.data - self._last_condition
+        if diff_condition > 30.0:
+            self._last_colliding_time = self.get_clock().now()
+            self.get_logger().warning(f"Collision detected!")
+        self._last_condition = msg.data
 
     def _wait_until_clock_received(self) -> None:
         rate = self.create_rate(10)
@@ -518,6 +531,12 @@ class MPCController(Node):
                 self._map.reset_map()
                 self._map.add_obstacles(self._obstacles)
 
+            is_colliding = False
+            if self._last_colliding_time is not None:
+                elapsed_from_last_colliding = (now - self._last_colliding_time).nanoseconds / 1e9
+                if elapsed_from_last_colliding < 5.0:
+                    is_colliding = True
+
             pose = odom_to_pose_2d(self._odom) # type: ignore
             v = self._odom.twist.twist.linear.x
 
@@ -566,7 +585,7 @@ class MPCController(Node):
 
             # Log states
             sim_logger.log(self._car, u, t)
-            sim_logger.plot_animation(t, loop, self._current_laps, self._lap_times, u, self._mpc, self._car)
+            sim_logger.plot_animation(t, loop, self._current_laps, self._lap_times, is_colliding, u, self._mpc, self._car)
 
 
             # 約 0.25 秒ごとに予測結果を表示

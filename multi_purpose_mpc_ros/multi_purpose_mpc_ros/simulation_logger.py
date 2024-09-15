@@ -70,7 +70,7 @@ class SimulationLogger:
         self.delta_log.append(np.degrees(u[1]))
         self.t_log.append(t)
 
-    def plot_animation(self, t, loop, current_laps, lap_times, u, mpc: MPC, car):
+    def plot_animation(self, t, loop, current_laps, lap_times, is_colliding: bool, u, mpc: MPC, car):
         idx = 0
 
         if loop % self._animation_interval == 0:
@@ -79,7 +79,7 @@ class SimulationLogger:
                 car.reference_path.show(self.axes[idx])
 
                 # Plot car
-                car.show(self.axes[idx])
+                car.show(is_colliding, self.axes[idx])
 
                 # Plot MPC prediction
                 mpc.show_prediction(self.axes[idx])
