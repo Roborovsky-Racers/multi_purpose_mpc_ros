@@ -316,7 +316,7 @@ class ReferencePath:
                 t_x, t_y = self.map.w2m(wp_x_w + max_width * np.cos(angle), wp_y_w
                                         + max_width * np.sin(angle))
                 # Compute distance to orthogonal cell on path border
-                b_value, b_cell = self._get_min_width(wp_x, wp_y, t_x, t_y, max_width)
+                b_value, b_cell = self._get_min_width(wp_x_w, wp_y_w, wp_x, wp_y, t_x, t_y, max_width)
 
                 # Add information to list for current waypoint
                 width_info.append(b_value)
@@ -330,10 +330,12 @@ class ReferencePath:
             wp.static_border_cells = (width_info[1], width_info[3])   # (left_border_cell(x,y), right_border_cell(x,y))
             wp.dynamic_border_cells = (width_info[1], width_info[3])
 
-    def _get_min_width(self, wp_x, wp_y, t_x, t_y, max_width):
+    def _get_min_width(self, wp_x_w, wp_y_w, wp_x, wp_y, t_x, t_y, max_width):
         """
         Compute the minimum distance between the current waypoint and the
         orthogonal cell on the border of the path
+        :param wp_x_w: x coordinate of the reference cell in world coordinates
+        :param wp_y_w: y coordinate of the reference cell in world coordinates
         :param wp_x: x coordinate of the reference cell in map coordinates
         :param wp_y: y coordinate of the reference cell in map coordinates
         :param t_x: x coordinate of border cell in map coordinates
@@ -364,7 +366,7 @@ class ReferencePath:
                     obstacle_x = x_list[obstacle_index]
                     obstacle_y = y_list[obstacle_index]
                     min_cell = self.map.m2w(obstacle_x, obstacle_y)
-                    min_width = np.hypot(wp_x - min_cell[0], wp_y - min_cell[1])
+                    min_width = np.hypot(wp_x_w - min_cell[0], wp_y_w - min_cell[1])
                     return min_width, min_cell
                 else:
                     # If no obstacles are found, add free space coordinates
@@ -377,7 +379,7 @@ class ReferencePath:
         if path_x.size > 0 and path_y.size > 0:
             min_index = np.argmin(np.hypot(path_x - t_x, path_y - t_y))
             min_cell = self.map.m2w(path_x[min_index], path_y[min_index])
-            min_width = np.hypot(wp_x - min_cell[0], wp_y - min_cell[1])
+            min_width = np.hypot(wp_x_w - min_cell[0], wp_y_w - min_cell[1])
 
         return min_width, min_cell
 
@@ -653,7 +655,8 @@ class ReferencePath:
         the given waypoint.
         """
 
-        # min_width = model_width / 2.0
+        # min_width = model_width / np.sqrt(2)
+        # min_width = model_width
         min_width = 2.0 * safety_margin
 
         # container for constraints and border cells
@@ -662,7 +665,7 @@ class ReferencePath:
         border_cells_hor = []
         border_cells_hor_sm = []
 
-        def add_constraint(wp, ub_ls, lb_ls, more_safety_rate=1.5):
+        def add_constraint(wp, ub_ls, lb_ls):
             # Check sign of upper and lower bound
             angle_ub = np.mod(np.arctan2(ub_ls[1] - wp.y, ub_ls[0] - wp.x)
                                   - wp.psi + math.pi, 2 * math.pi) - math.pi
@@ -677,31 +680,30 @@ class ReferencePath:
             lb = sign_lb * np.sqrt(
                     (lb_ls[0] - wp.x) ** 2 + (lb_ls[1] - wp.y) ** 2)
 
-            updated_safety_margin = safety_margin
-
             segment_length = ub - lb
-            # print(f"min_width: {min_width}, safety_margin: {safety_margin}, segment_length: {segment_length}")
-            if segment_length < 2.0 * safety_margin:
-                updated_safety_margin = min_width
-            elif segment_length > 2.0 * more_safety_rate * safety_margin:
-                updated_safety_margin = more_safety_rate * safety_margin
-
-            # Subtract safety margin
-            ub -= updated_safety_margin
-            lb += updated_safety_margin
+            segment_length_sm = segment_length - 2.0 * safety_margin
 
             # Check feasibility of the path
-            if ub < lb:
-                # Upper and lower bound of 0 indicate an infeasible path
+            if segment_length_sm < min_width:
+                left_angle = np.mod(wp.psi + math.pi / 2 + math.pi,
+                                 2 * math.pi) - math.pi
+                right_angle = np.mod(wp.psi - math.pi / 2 + math.pi,
+                                   2 * math.pi) - math.pi
+
+                # t_x, t_y = self.map.w2m(wp_x_w + max_width * np.cos(angle), wp_y_w
+                #                         + max_width * np.sin(angle))
+
                 print("Infeasible path detected!")
-                print(f"Waypoint: {wp_id}, n: {n}, Upper bound: {ub}, Lower bound: {lb}")
-                print(f"min_width: {min_width}, safety_margin: {safety_margin}, segment_length: {segment_length}")
-                # ub, lb = 0.0, 0.0
-                ub = +min_width
-                lb = -min_width
-            # else:
-            #     self.select_free_segs.append([ub_ls, lb_ls])
-            # self.select_free_segs.append([ub_ls, lb_ls])
+                print(f"Waypoint: {wp_id}, n: {n}, Upper bound: {ub}, Lower bound: {lb}, WP ub: {wp.ub}, WP lb: {wp.lb}")
+                print(f"ub_ls: {ub_ls}, lb_ls: {lb_ls}, static cells {wp.static_border_cells}")
+                print(f"angle_ub: {angle_ub}, angle_lb: {angle_lb}, left_angle: {left_angle}, right_angle: {right_angle}")
+                print(f"min_width: {min_width}, safety_margin: {safety_margin}, segment_length: {segment_length}, segment_length_sm: {segment_length_sm}")
+                (ub, lb) = (wp.ub, wp.lb)
+                # print(f"Updated Upper bound: {wp.ub}, Updated Lower bound: {wp.lb}")
+
+            # Subtract safety margin
+            ub -= safety_margin
+            lb += safety_margin
 
             # Compute absolute angle of bound cell
             angle_ub = np.mod(math.pi / 2 + wp.psi + math.pi,
@@ -717,9 +719,9 @@ class ReferencePath:
             self.select_free_segs.append([ub_ls, lb_ls])
 
             # Compute cell on bound for computed distance ub and lb
-            ub_ls = wp.x + (ub + updated_safety_margin) * np.cos(angle_ub), wp.y + (ub + updated_safety_margin) * np.sin(
+            ub_ls = wp.x + (ub + safety_margin) * np.cos(angle_ub), wp.y + (ub + safety_margin) * np.sin(
                 angle_ub)
-            lb_ls = wp.x - (lb - updated_safety_margin) * np.cos(angle_lb), wp.y - (lb - updated_safety_margin) * np.sin(
+            lb_ls = wp.x - (lb - safety_margin) * np.cos(angle_lb), wp.y - (lb - safety_margin) * np.sin(
                 angle_lb)
             bound_cells = (ub_ls, lb_ls)
 
