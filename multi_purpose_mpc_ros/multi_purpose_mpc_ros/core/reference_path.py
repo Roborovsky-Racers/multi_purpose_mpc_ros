@@ -2,6 +2,7 @@ from typing import List, Optional
 import numpy as np
 import numpy.ma as ma
 import math
+import copy
 from multi_purpose_mpc_ros.core.map import Map, Obstacle
 from skimage.draw import line_aa
 import matplotlib.pyplot as plt
@@ -81,6 +82,8 @@ class Waypoint:
         # Lower bound: free drivable area to the right of center-line in m
         self.lb = None
         self.ub = None
+        self.lb_sm = None
+        self.ub_sm = None
         self.static_border_cells = None
         self.dynamic_border_cells = None
 
@@ -170,6 +173,12 @@ class ReferencePath:
     def set_border_cells(self, dynamic_upper_bounds: List[float], dynamic_lower_bounds: List[float], n_rows, n_cols) -> None:
         self.border_cells.dynamic_upper_bounds = np.array(dynamic_upper_bounds).reshape(n_rows, n_cols, 2)
         self.border_cells.dynamic_lower_bounds = np.array(dynamic_lower_bounds).reshape(n_rows, n_cols, 2)
+
+    def reset_dynamic_constraints(self):
+        for wp in self.waypoints:
+            wp.dynamic_border_cells = copy.deepcopy(wp.static_border_cells)
+            wp.ub_sm = copy.deepcopy(wp.ub)
+            wp.lb_sm = copy.deepcopy(wp.lb)
 
     def _construct_path(self, wp_x, wp_y):
         """
@@ -328,7 +337,8 @@ class ReferencePath:
             # represent center-line of the path
             # Set border cells of waypoint
             wp.static_border_cells = (width_info[1], width_info[3])   # (left_border_cell(x,y), right_border_cell(x,y))
-            wp.dynamic_border_cells = (width_info[1], width_info[3])
+
+        self.reset_dynamic_constraints()
 
     def _get_min_width(self, wp_x_w, wp_y_w, wp_x, wp_y, t_x, t_y, max_width):
         """
@@ -702,37 +712,46 @@ class ReferencePath:
                 # print(f"Updated Upper bound: {wp.ub}, Updated Lower bound: {wp.lb}")
 
             # Subtract safety margin
-            ub -= safety_margin
-            lb += safety_margin
+            ub_sm = ub - safety_margin
+            lb_sm = lb + safety_margin
+
+            if wp.ub_sm < ub_sm:
+              # print(f"Waypoint: {wp_id}, n: {n}, Upper bound: {ub_sm}, Previous: {wp.ub_sm}")
+              ub_sm = wp.ub_sm
+            if wp.lb_sm > lb_sm:
+              # print(f"Waypoint: {wp_id}, n: {n}, Lower bound: {lb_sm}, Previous: {wp.lb_sm}")
+              lb_sm = wp.lb_sm
 
             # Compute absolute angle of bound cell
             angle_ub = np.mod(math.pi / 2 + wp.psi + math.pi,
                                   2 * math.pi) - math.pi
             angle_lb = np.mod(-math.pi / 2 + wp.psi + math.pi,
                                   2 * math.pi) - math.pi
-            # Compute cell on bound for computed distance ub and lb
-            ub_ls = wp.x + ub * np.cos(angle_ub), wp.y + ub * np.sin(
+            # Compute cell on bound for computed distance ub_sm and lb_sm
+            ub_sm_ls = wp.x + ub_sm * np.cos(angle_ub), wp.y + ub_sm * np.sin(
                     angle_ub)
-            lb_ls = wp.x - lb * np.cos(angle_lb), wp.y - lb * np.sin(
+            lb_sm_ls = wp.x - lb_sm * np.cos(angle_lb), wp.y - lb_sm * np.sin(
                     angle_lb)
-            bound_cells_sm = (ub_ls, lb_ls)
-            self.select_free_segs.append([ub_ls, lb_ls])
+            bound_cells_sm = (ub_sm_ls, lb_sm_ls)
+            self.select_free_segs.append([ub_sm_ls, lb_sm_ls])
 
             # Compute cell on bound for computed distance ub and lb
-            ub_ls = wp.x + (ub + safety_margin) * np.cos(angle_ub), wp.y + (ub + safety_margin) * np.sin(
+            ub_ls = wp.x + ub * np.cos(angle_ub), wp.y + ub * np.sin(
                 angle_ub)
-            lb_ls = wp.x - (lb - safety_margin) * np.cos(angle_lb), wp.y - (lb - safety_margin) * np.sin(
+            lb_ls = wp.x - lb * np.cos(angle_lb), wp.y - lb * np.sin(
                 angle_lb)
             bound_cells = (ub_ls, lb_ls)
 
             # Append results
-            ub_hor.append(ub)
-            lb_hor.append(lb)
+            ub_hor.append(ub_sm)
+            lb_hor.append(lb_sm)
             border_cells_hor.append(list(bound_cells))
             border_cells_hor_sm.append(list(bound_cells_sm))
 
             # Assign dynamic border cells to waypoints
             wp.dynamic_border_cells = bound_cells_sm
+            wp.ub_sm = ub_sm
+            wp.lb_sm = lb_sm
 
         self.rect_points = []
         self.upper_cols = []
@@ -901,14 +920,15 @@ class ReferencePath:
         # safety_marginを考慮したborder_cellsを滑らかにする
         # border_cells_smの連続する点を直線で結び、前後の直線がなす角がしきい値より大きい場合、
         # 間の点を一つ飛ばして直線を引きなおすようにborder_cells_smを更新する
-        ANGLE_TH = np.deg2rad(45.0)
-        SEARCH_HORIZON = 3  # >=1
+        ANGLE_TH = np.deg2rad(30.0)
+        SEARCH_HORIZON = 5  # >=1
 
         for n in reversed(range(SEARCH_HORIZON, N-SEARCH_HORIZON+1)):
             mid_index = n
             waypoint_mid = self.get_waypoint(wp_id+n)
             wp_mid = (waypoint_mid.x, waypoint_mid.y)
             new_border_cells_hor_sm_mid = [border_cells_hor_sm[mid_index][0], border_cells_hor_sm[mid_index][1]]
+            new_bound_sm = [waypoint_mid.ub_sm, waypoint_mid.lb_sm]
 
             before_indeices = []
             after_indices = []
@@ -923,11 +943,9 @@ class ReferencePath:
             border_cell_indices_combinations = list(itertools.product(before_indeices, after_indices))
             # print(f"n: {n}, border_cell_indices_combinations: {border_cell_indices_combinations}")
 
-            def validate_intersection(old_bound_cell, new_bound_cell, bound_sign):
+            def validate_intersection(old_bound, new_bound, new_bound_cell, bound_sign):
                 # boundが安全寄りになっている場合のみ更新を許可
-                old_bound = bound_sign * compute_bound(waypoint_mid, old_bound_cell)
-                new_bound = bound_sign * compute_bound(waypoint_mid, new_bound_cell)
-                if new_bound > old_bound:
+                if bound_sign * new_bound > bound_sign * old_bound:
                     # print(f"n: {n} has invalid bound! old: {old_bound}, new: {new_bound}")
                     return False
 
@@ -943,6 +961,7 @@ class ReferencePath:
                 index = 0 if dir == 'upper' else 1
                 bound_sign = 1 if dir == 'upper' else -1
                 bound_hor = ub_hor if dir == 'upper' else lb_hor
+                bound_mid = waypoint_mid.ub_sm if bound_sign == 1 else waypoint_mid.lb_sm
                 border_cell_mid = border_cells_hor_sm[mid_index][index]
 
                 def try_update_border_cell_for_safety(border_cell_before, border_cell_after, is_nearest_pair: bool):
@@ -954,15 +973,19 @@ class ReferencePath:
                     # 前後のborder_cellを結んだ直線と、間のwpとborder_cellを結んだ直線の交点を求める
                     new_border_cell_mid = calculate_intersection(wp_mid, border_cell_mid, border_cell_before, border_cell_after)
 
+                    # 前記直線の交点とwaypoint_midの距離を計算
+                    new_bound_mid = compute_bound(waypoint_mid, new_border_cell_mid)
+
                     # 交点が安全寄りで、干渉なしであれば更新する
                     # print(f"n: {n}, angle_ub: {angle_ub}, new_ub1: {new_ub1}")
-                    if not validate_intersection(border_cell_mid, new_border_cell_mid, bound_sign):
+                    if not validate_intersection(bound_mid, new_bound_mid, new_border_cell_mid, bound_sign):
                         return False
 
                     # self.modified_ub.append([ub0, new_ub1])
                     # self.modified_ub.append([new_ub1, ub2])
-                    bound_hor[mid_index] = compute_bound(waypoint_mid, new_border_cell_mid)
+                    bound_hor[mid_index] = new_bound_mid
                     new_border_cells_hor_sm_mid[index] = new_border_cell_mid
+                    new_bound_sm[index] = new_bound_mid
 
                     return True
 
@@ -974,6 +997,8 @@ class ReferencePath:
             # update border cells (border_cells_horは以降使用しないので更新不要)
             border_cells_hor_sm[mid_index] = new_border_cells_hor_sm_mid
             waypoint_mid.dynamic_border_cells = tuple(new_border_cells_hor_sm_mid)
+            waypoint_mid.ub_sm = new_bound_sm[0]
+            waypoint_mid.lb_sm = new_bound_sm[1]
 
         return np.array(ub_hor), np.array(lb_hor), np.array(border_cells_hor_sm)
 

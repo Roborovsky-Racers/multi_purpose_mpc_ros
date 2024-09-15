@@ -533,6 +533,7 @@ class MPCController(Node):
                 # self.get_logger().info("Obstacles updated")
                 self._map.reset_map()
                 self._map.add_obstacles(self._obstacles)
+                self._reference_path.reset_dynamic_constraints()
 
             is_colliding = False
             if self._last_colliding_time is not None:
