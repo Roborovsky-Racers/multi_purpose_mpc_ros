@@ -920,8 +920,8 @@ class ReferencePath:
         # safety_marginを考慮したborder_cellsを滑らかにする
         # border_cells_smの連続する点を直線で結び、前後の直線がなす角がしきい値より大きい場合、
         # 間の点を一つ飛ばして直線を引きなおすようにborder_cells_smを更新する
-        ANGLE_TH = np.deg2rad(30.0)
-        SEARCH_HORIZON = 5  # >=1
+        ANGLE_TH = np.deg2rad(45.0)
+        SEARCH_HORIZON = 3  # >=1
 
         for n in reversed(range(SEARCH_HORIZON, N-SEARCH_HORIZON+1)):
             mid_index = n
