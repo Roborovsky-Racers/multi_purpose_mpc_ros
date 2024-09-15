@@ -576,6 +576,11 @@ class ReferencePath:
         # for seg in self.select_free_segs:
         #     ax.plot([seg[0][0], seg[1][0]], [seg[0][1], seg[1][1]], "o-", c='red', markersize=2, linewidth=1)
 
+        # for ub, prev_ub in self.modified_ub:
+        #     ax.plot([prev_ub[0], ub[0]], [prev_ub[1], ub[1]], "o-", c='red', markersize=2, linewidth=1)
+        # for lb, prev_lb in self.modified_lb:
+        #     ax.plot([prev_lb[0], lb[0]], [prev_lb[1], lb[1]], "o-", c='red', markersize=2, linewidth=1)
+
         # self.cols = np.array(self.cols)
         # print(len(self.cols))
         # for i, cols in enumerate(self.upper_cols):
@@ -668,34 +673,28 @@ class ReferencePath:
         border_cells_hor = []
         border_cells_hor_sm = []
 
-        def add_constraint(wp, ub_ls, lb_ls):
-            # Check sign of upper and lower bound
-            angle_ub = np.mod(np.arctan2(ub_ls[1] - wp.y, ub_ls[0] - wp.x)
+        def compute_bound(wp, ls):
+            # Check sign of bound
+            angle = np.mod(np.arctan2(ls[1] - wp.y, ls[0] - wp.x)
                                   - wp.psi + math.pi, 2 * math.pi) - math.pi
-            angle_lb = np.mod(np.arctan2(lb_ls[1] - wp.y, lb_ls[0] - wp.x)
-                                  - wp.psi + math.pi, 2 * math.pi) - math.pi
-            sign_ub = np.sign(angle_ub)
-            sign_lb = np.sign(angle_lb)
+            sign = np.sign(angle)
 
+            # Compute bound
+            bound = sign * np.sqrt(
+                    (ls[0] - wp.x) ** 2 + (ls[1] - wp.y) ** 2)
+
+            return bound
+
+        def add_constraint(wp, ub_ls, lb_ls):
             # Compute upper and lower bound of largest drivable area
-            ub = sign_ub * np.sqrt(
-                    (ub_ls[0] - wp.x) ** 2 + (ub_ls[1] - wp.y) ** 2)
-            lb = sign_lb * np.sqrt(
-                    (lb_ls[0] - wp.x) ** 2 + (lb_ls[1] - wp.y) ** 2)
+            ub = compute_bound(wp, ub_ls)
+            lb = compute_bound(wp, lb_ls)
 
             segment_length = ub - lb
             segment_length_sm = segment_length - 2.0 * safety_margin
 
             # Check feasibility of the path
             if segment_length_sm < min_segment_length:
-                left_angle = np.mod(wp.psi + math.pi / 2 + math.pi,
-                                 2 * math.pi) - math.pi
-                right_angle = np.mod(wp.psi - math.pi / 2 + math.pi,
-                                   2 * math.pi) - math.pi
-
-                # t_x, t_y = self.map.w2m(wp_x_w + max_width * np.cos(angle), wp_y_w
-                #                         + max_width * np.sin(angle))
-
                 print("Infeasible path detected!")
                 print(f"Waypoint: {wp_id}, n: {n}, Upper bound: {ub}")
                 print(f"min_width: {min_width}, safety_margin: {safety_margin}, segment_length: {segment_length}, segment_length_sm: {segment_length_sm}")
@@ -734,7 +733,6 @@ class ReferencePath:
 
             # Assign dynamic border cells to waypoints
             wp.dynamic_border_cells = bound_cells_sm
-
 
         self.rect_points = []
         self.upper_cols = []
@@ -865,6 +863,103 @@ class ReferencePath:
 
         # if show:
         #     print(f"ub_hor: {ub_hor}, lb_hor: {lb_hor}")
+
+        self.modified_ub = []
+        self.modified_lb = []
+
+        def calculate_angle(p1, p2, p3):
+            # 傾きの計算
+            m1 = (p2[1] - p1[1]) / (p2[0] - p1[0])
+            m2 = (p3[1] - p2[1]) / (p3[0] - p2[0])
+
+            # なす角の計算
+            tan_theta = (m1 - m2) / (1 + m1 * m2)
+            theta = math.atan(tan_theta)
+            return theta
+
+        def calculate_intersection(p1, p2, p3, p4):
+            # 直線1の傾きと切片
+            m1 = (p2[1] - p1[1]) / (p2[0] - p1[0])
+            b1 = p1[1] - m1 * p1[0]
+
+            # 直線2の傾きと切片
+            m2 = (p4[1] - p3[1]) / (p4[0] - p3[0])
+            b2 = p3[1] - m2 * p3[0]
+
+            # 傾きが同じ場合、平行なため交点なし
+            if m1 == m2:
+                return None
+
+            # x座標の計算
+            x_intersection = (b2 - b1) / (m1 - m2)
+
+            # y座標の計算
+            y_intersection = m1 * x_intersection + b1
+
+            return (x_intersection, y_intersection)
+
+        # safety_marginを考慮したborder_cellsを滑らかにする
+        # border_cells_smの連続する点を直線で結び、前後の直線がなす角がしきい値より大きい場合、
+        # 間の点を一つ飛ばして直線を引きなおすようにborder_cells_smを更新する
+        ANGLE_TH = np.deg2rad(45.0)
+        for n in reversed(range(2, N)):
+            ub0 = border_cells_hor_sm[n][0]
+            ub1 = border_cells_hor_sm[n-1][0]
+            ub2 = border_cells_hor_sm[n-2][0]
+            lb0 = border_cells_hor_sm[n][1]
+            lb1 = border_cells_hor_sm[n-1][1]
+            lb2 = border_cells_hor_sm[n-2][1]
+
+            bound_cells_sm1 = [ub1, lb1]
+
+            waypoint1 = self.get_waypoint(wp_id+n-1)
+            wp1 = (waypoint1.x, waypoint1.y)
+
+            angle_ub = calculate_angle(ub0, ub1, ub2)
+            angle_lb = calculate_angle(lb0, lb1, lb2)
+            # print(f"n: {n}, angle_ub: {np.rad2deg(angle_ub)}, angle_lb: {np.rad2deg(angle_lb)}")
+
+            def validate_intersection(old_bound_cell, new_bound_cell, bound_sign):
+                # boundが安全寄りになっている場合のみ更新を許可
+                old_bound = bound_sign * compute_bound(waypoint1, old_bound_cell)
+                new_bound = bound_sign * compute_bound(waypoint1, new_bound_cell)
+                if new_bound > old_bound:
+                    # print(f"n: {n} has invalid bound! old: {old_bound}, new: {new_bound}")
+                    return False
+
+                # 更新後のbound cellが障害物に被っていないか確認
+                t_x, t_y = self.map.w2m(new_bound_cell[0], new_bound_cell[1])
+                if self._is_obstacle_occupied(t_x, t_y):
+                    # print(f"n: {n} has collision!")
+                    return False
+
+                return True
+
+            if np.abs(angle_ub) > ANGLE_TH:
+                # 前後のborder_cellを結んだ直線と、間のwpとborder_cellを結んだ直線の交点を求める
+                new_ub1 = calculate_intersection(wp1, ub1, ub0, ub2)
+
+                # 交点が安全寄りで、干渉なしであれば更新する
+                # print(f"n: {n}, angle_ub: {angle_ub}, new_ub1: {new_ub1}")
+                if validate_intersection(ub1, new_ub1, 1.0):
+                    # self.modified_ub.append([ub0, new_ub1])
+                    # self.modified_ub.append([new_ub1, ub2])
+                    ub_hor[n-1] = compute_bound(waypoint1, new_ub1)
+                    bound_cells_sm1[0] = new_ub1
+
+            if np.abs(angle_lb) > ANGLE_TH:
+                new_lb1 = calculate_intersection(wp1, lb1, lb0, lb2)
+
+                # print(f"n: {n}, angle_lb: {angle_lb}, new_lb1: {new_lb1}")
+                if validate_intersection(lb1, new_lb1, -1.0):
+                    # self.modified_lb.append([lb0, new_lb1])
+                    # self.modified_lb.append([new_lb1, lb2])
+                    lb_hor[n-1] = compute_bound(waypoint1, new_lb1)
+                    bound_cells_sm1[1] = new_lb1
+
+            # update border cells (border_cells_horは以降使用しないので更新不要)
+            border_cells_hor_sm[n-1] = bound_cells_sm1
+            waypoint1.dynamic_border_cells = tuple(bound_cells_sm1)
 
         return np.array(ub_hor), np.array(lb_hor), np.array(border_cells_hor_sm)
 
