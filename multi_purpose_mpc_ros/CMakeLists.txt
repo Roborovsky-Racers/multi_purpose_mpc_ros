@@ -34,6 +34,7 @@ install(PROGRAMS
   scripts/path_constraints_provider.bash
   scripts/mpc_controller
   scripts/mpc_simulation
+  scripts/obstacle_parser.py
   scripts/path_constraints_provider
   scripts/publish_initialpose
   DESTINATION lib/${PROJECT_NAME}
