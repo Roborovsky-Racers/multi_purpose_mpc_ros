@@ -13,6 +13,9 @@ class ObstacleManager:
         self.obs_idx = 0
         self.queue_size = 10
 
+    def push_all_obstacles(self):
+        self.current_obstacles = self.obstacles
+
     def push_next_obstacle(self):
         # Remove the oldest obstacle if the queue is full
         if len(self.current_obstacles) > self.queue_size:
