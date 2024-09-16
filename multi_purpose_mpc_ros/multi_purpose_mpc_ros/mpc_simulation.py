@@ -28,7 +28,7 @@ class MPCSimulation:
         SHOW_SIM_ANIMATION = True
         SHOW_PLOT_ANIMATION = True
         PLOT_RESULTS = True
-        ANIMATION_INTERVAL = 20
+        ANIMATION_INTERVAL = 5
         PRINT_INTERVAL = 0
         MAX_LAPS = 6
 
@@ -52,6 +52,10 @@ class MPCSimulation:
         init_odom.pose.pose.orientation.w = INIT_POSE_ORIENTATION_W
 
         pose = odom_to_pose_2d(init_odom)
+        pose.x = 89648.61780001601
+        pose.y = 43162.71519930651
+        pose.theta = -np.pi / 4.
+
         car.update_states(pose.x, pose.y, pose.theta)
 
         def plot_reference_path(car):
@@ -64,6 +68,9 @@ class MPCSimulation:
         obstacles: List[Obstacle] = copy.deepcopy(self._controller._obstacles)
         obstacle_manager = ObstacleManager(map, obstacles)
 
+        obstacle_manager.push_all_obstacles()
+        obstacle_manager.update_map()
+
         logger = self._controller.get_logger()
         sim_logger = SimulationLogger(
             logger,
@@ -71,9 +78,12 @@ class MPCSimulation:
 
         t = 0.0
         loop = 0
+        last_u = np.array([0.0, 0.0])
         current_laps = 1
         lap_times = [None] * (MAX_LAPS + 1)
         next_lap_start = False
+
+        mpc_cfg = self._controller._mpc_cfg
 
         while rclpy.ok() and (not sim_logger.stop_requested()) and current_laps <= MAX_LAPS:
             if PRINT_INTERVAL != 0 and loop % PRINT_INTERVAL == 0:
@@ -82,6 +92,16 @@ class MPCSimulation:
 
             # Get control signals
             u = mpc.get_control()
+            if len(u) == 0:
+                self.get_logger().error("No control signal", throttle_duration_sec=1)
+                u = [0.0, 0.0]
+            else:
+                # limit acceleration
+                acc = (u[0] - last_u[0]) / car.Ts
+                acc = np.clip(acc, mpc_cfg.a_min, mpc_cfg.a_max)
+                u[0] = last_u[0] + acc * car.Ts
+
+            last_u = u
 
             # Simulate car
             car.drive(u)
