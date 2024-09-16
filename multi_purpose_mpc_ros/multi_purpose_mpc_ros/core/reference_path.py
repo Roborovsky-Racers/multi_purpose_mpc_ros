@@ -734,10 +734,13 @@ class ReferencePath:
             segment_length_sm = segment_length - 2.0 * safety_margin
 
             # Check feasibility of the path
+            # segment_lengthから両側のsafety_marginを引いた値がmin_segment_lengthより小さい場合は、
+            # border_cellsで囲まれる領域の隙間が狭すぎて障害物回避が困難なため、
+            # 回避を諦めてwaypointのstaticなupper boundとlower boundを代わりに使用する
             if segment_length_sm < min_segment_length:
-                print("Infeasible path detected!")
-                print(f"Waypoint: {wp_id}, n: {n}, Upper bound: {ub}")
-                print(f"min_width: {min_width}, safety_margin: {safety_margin}, segment_length: {segment_length}, segment_length_sm: {segment_length_sm}")
+                # print("Infeasible path detected!")
+                # print(f"Waypoint: {wp_id}, n: {n}, Upper bound: {ub}")
+                # print(f"min_width: {min_width}, safety_margin: {safety_margin}, segment_length: {segment_length}, segment_length_sm: {segment_length_sm}")
                 (ub, lb) = (wp.ub, wp.lb)
                 # print(f"Updated Upper bound: {wp.ub}, Updated Lower bound: {wp.lb}")
 
@@ -746,11 +749,16 @@ class ReferencePath:
             lb_sm = lb + safety_margin
 
             if wp.ub_sm < ub_sm:
-              # print(f"Waypoint: {wp_id}, n: {n}, Upper bound: {ub_sm}, Previous: {wp.ub_sm}")
               ub_sm = wp.ub_sm
             if wp.lb_sm > lb_sm:
-              # print(f"Waypoint: {wp_id}, n: {n}, Lower bound: {lb_sm}, Previous: {wp.lb_sm}")
               lb_sm = wp.lb_sm
+
+            # Check feasibility of the path after subtracting safety margin
+            if ub_sm < lb_sm:
+                # 一つ前のifの判定でboundsは正常になっているはずなので、こちらの判定に入る場合は何らかの実装上の異常がある
+                print("!!!! Infeasible path detected !!!!")
+                ub_sm = 0.0
+                lb_sm = 0.0
 
             # Compute absolute angle of bound cell
             angle_ub = np.mod(math.pi / 2 + wp.psi + math.pi,
@@ -865,7 +873,11 @@ class ReferencePath:
                     if n > 0:
                         ub_pw, lb_pw = border_cells_hor[n-1]
                     else:
-                        ub_pw, lb_pw =  [pose[0], pose[1]], [pose[0], pose[1]]
+                        if pose is not None:
+                            ub_pw, lb_pw =  [pose[0], pose[1]], [pose[0], pose[1]]
+                        else:
+                            ub_pw, lb_pw =  [wp.x, wp.y], [wp.x, wp.y]
+
                     total_segment_length = calculate_combination_total_segment_length(combination, ub_pw, lb_pw)
                     combination_segment_length.append(total_segment_length)
                     combination_indices.append(combination)
@@ -910,7 +922,7 @@ class ReferencePath:
 
                 n += 1  # increment waypoint index
 
-        # return np.array(ub_hor), np.array(lb_hor), np.array(border_cells_hor_sm)
+        return np.array(ub_hor), np.array(lb_hor), np.array(border_cells_hor_sm)
 
         self.modified_ub = []
         self.modified_lb = []

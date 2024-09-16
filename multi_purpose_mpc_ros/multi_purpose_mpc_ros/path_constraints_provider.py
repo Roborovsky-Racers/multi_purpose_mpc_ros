@@ -224,6 +224,8 @@ class PathConstraintsProvider(Node):
         border_cells.cols = self._mpc_cfg.N
         border_cells.rows = self._reference_path.n_waypoints - 1
 
+        pose = None
+
         rate = self.create_rate(0.5)
         while rclpy.ok():
             self._path_constraints.upper_bounds = []
@@ -236,11 +238,15 @@ class PathConstraintsProvider(Node):
                     self._obstacles_updated = False
                     self._map.reset_map()
                     self._map.add_obstacles(self._obstacles)
+                    self._reference_path.reset_dynamic_constraints()
 
                 ub_hor, lb_hor, border_cells_hor_sm = self._car.reference_path.update_path_constraints(
-                    wp_id + 1, self._mpc_cfg.N,
+                    wp_id + 1, pose, self._mpc_cfg.N,
                     self._car.length, self._car.width, self._car.safety_margin
                 )
+                ub_pw, lb_pw = np.array(border_cells_hor_sm[1])
+                pose = (np.array(ub_pw) + np.array(lb_pw)) / 2.
+
                 self._path_constraints.upper_bounds.extend(ub_hor)
                 self._path_constraints.lower_bounds.extend(lb_hor)
                 # if wp_id == 0:
