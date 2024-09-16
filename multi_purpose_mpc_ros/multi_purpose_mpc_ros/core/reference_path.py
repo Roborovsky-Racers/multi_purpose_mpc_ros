@@ -50,6 +50,36 @@ def calculate_area(vertices):
 
     return area
 
+def calculate_angle(p1, p2, p3):
+    # 傾きの計算
+    m1 = (p2[1] - p1[1]) / (p2[0] - p1[0])
+    m2 = (p3[1] - p2[1]) / (p3[0] - p2[0])
+
+    # なす角の計算
+    tan_theta = (m1 - m2) / (1 + m1 * m2)
+    theta = math.atan(tan_theta)
+    return theta
+
+def calculate_intersection(p1, p2, p3, p4):
+    # 直線1の傾きと切片
+    m1 = (p2[1] - p1[1]) / (p2[0] - p1[0])
+    b1 = p1[1] - m1 * p1[0]
+
+    # 直線2の傾きと切片
+    m2 = (p4[1] - p3[1]) / (p4[0] - p3[0])
+    b2 = p3[1] - m2 * p3[0]
+
+    # 傾きが同じ場合、平行なため交点なし
+    if m1 == m2:
+        return None
+
+    # x座標の計算
+    x_intersection = (b2 - b1) / (m1 - m2)
+
+    # y座標の計算
+    y_intersection = m1 * x_intersection + b1
+
+    return (x_intersection, y_intersection)
 
 ############
 # Waypoint #
@@ -880,42 +910,10 @@ class ReferencePath:
 
                 n += 1  # increment waypoint index
 
-        # if show:
-        #     print(f"ub_hor: {ub_hor}, lb_hor: {lb_hor}")
+        # return np.array(ub_hor), np.array(lb_hor), np.array(border_cells_hor_sm)
 
         self.modified_ub = []
         self.modified_lb = []
-
-        def calculate_angle(p1, p2, p3):
-            # 傾きの計算
-            m1 = (p2[1] - p1[1]) / (p2[0] - p1[0])
-            m2 = (p3[1] - p2[1]) / (p3[0] - p2[0])
-
-            # なす角の計算
-            tan_theta = (m1 - m2) / (1 + m1 * m2)
-            theta = math.atan(tan_theta)
-            return theta
-
-        def calculate_intersection(p1, p2, p3, p4):
-            # 直線1の傾きと切片
-            m1 = (p2[1] - p1[1]) / (p2[0] - p1[0])
-            b1 = p1[1] - m1 * p1[0]
-
-            # 直線2の傾きと切片
-            m2 = (p4[1] - p3[1]) / (p4[0] - p3[0])
-            b2 = p3[1] - m2 * p3[0]
-
-            # 傾きが同じ場合、平行なため交点なし
-            if m1 == m2:
-                return None
-
-            # x座標の計算
-            x_intersection = (b2 - b1) / (m1 - m2)
-
-            # y座標の計算
-            y_intersection = m1 * x_intersection + b1
-
-            return (x_intersection, y_intersection)
 
         # safety_marginを考慮したborder_cellsを滑らかにする
         # border_cells_smの連続する点を直線で結び、前後の直線がなす角がしきい値より大きい場合、
