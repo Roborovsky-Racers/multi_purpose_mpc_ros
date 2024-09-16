@@ -81,6 +81,17 @@ def calculate_intersection(p1, p2, p3, p4):
 
     return (x_intersection, y_intersection)
 
+def has_collision_in_line(map, p0, p1):
+    p0m = map.w2m(p0[0], p0[1])
+    p1m = map.w2m(p1[0], p1[1])
+    x_list, y_list, _ = line_aa(p0m[0], p0m[1], p1m[0], p1m[1])
+
+    occupied_indices = map.data[y_list, x_list] == 0
+    if np.any(occupied_indices):
+        return True
+    else:
+        return False
+
 ############
 # Waypoint #
 ############
@@ -838,17 +849,6 @@ class ReferencePath:
                 #     print(f"n :{n}, free_segments_indices: {free_segments_indices}")
 
                 def calculate_combination_total_segment_length(index_combination, ub_pw, lb_pw):
-                    def has_collision(p0, p1):
-                        p0m = self.map.w2m(p0[0], p0[1])
-                        p1m = self.map.w2m(p1[0], p1[1])
-                        x_list, y_list, _ = line_aa(p0m[0], p0m[1], p1m[0], p1m[1])
-
-                        occupied_indices = self.map.data[y_list, x_list] == 0
-                        if np.any(occupied_indices):
-                            return True
-                        else:
-                            return False
-
                     total_segment_length = 0.0
 
                     for i, segment_index in enumerate(index_combination):
@@ -857,7 +857,7 @@ class ReferencePath:
                         mean_prev = (np.array(ub_pw) + np.array(lb_pw)) / 2.
                         mean_fs = (np.array(ub_fs) + np.array(lb_fs)) / 2.
 
-                        if has_collision(mean_prev, mean_fs):
+                        if has_collision_in_line(self.map, mean_prev, mean_fs):
                             self.upper_cols.append([[mean_prev[0], mean_fs[0]], [mean_prev[1], mean_fs[1]]])
                             return -1000000.0 # penalty because has collision!
 
@@ -922,7 +922,7 @@ class ReferencePath:
 
                 n += 1  # increment waypoint index
 
-        return np.array(ub_hor), np.array(lb_hor), np.array(border_cells_hor_sm)
+        # return np.array(ub_hor), np.array(lb_hor), np.array(border_cells_hor_sm)
 
         self.modified_ub = []
         self.modified_lb = []
@@ -931,7 +931,7 @@ class ReferencePath:
         # border_cells_smの連続する点を直線で結び、前後の直線がなす角がしきい値より大きい場合、
         # 間の点を一つ飛ばして直線を引きなおすようにborder_cells_smを更新する
         ANGLE_TH = np.deg2rad(45.0)
-        SEARCH_HORIZON = 3  # >=1
+        SEARCH_HORIZON = 3 # >=1
 
         for n in reversed(range(SEARCH_HORIZON, N-SEARCH_HORIZON+1)):
             mid_index = n
@@ -953,7 +953,7 @@ class ReferencePath:
             border_cell_indices_combinations = list(itertools.product(before_indeices, after_indices))
             # print(f"n: {n}, border_cell_indices_combinations: {border_cell_indices_combinations}")
 
-            def validate_intersection(old_bound, new_bound, new_bound_cell, bound_sign):
+            def validate_intersection(old_bound, new_bound, new_bound_cell, border_cell_after, bound_sign):
                 # boundが安全寄りになっている場合のみ更新を許可
                 if bound_sign * new_bound > bound_sign * old_bound:
                     # print(f"n: {n} has invalid bound! old: {old_bound}, new: {new_bound}")
@@ -964,6 +964,9 @@ class ReferencePath:
                 if self._is_obstacle_occupied(t_x, t_y):
                     # print(f"n: {n} has collision!")
                     return False
+                # if has_collision_in_line(self.map, border_cell_after, new_bound_cell):
+                #     # print(f"n: {n} has collision!")
+                #     return False
 
                 return True
 
@@ -987,8 +990,7 @@ class ReferencePath:
                     new_bound_mid = compute_bound(waypoint_mid, new_border_cell_mid)
 
                     # 交点が安全寄りで、干渉なしであれば更新する
-                    # print(f"n: {n}, angle_ub: {angle_ub}, new_ub1: {new_ub1}")
-                    if not validate_intersection(bound_mid, new_bound_mid, new_border_cell_mid, bound_sign):
+                    if not validate_intersection(bound_mid, new_bound_mid, new_border_cell_mid, border_cell_after, bound_sign):
                         return False
 
                     # self.modified_ub.append([ub0, new_ub1])
