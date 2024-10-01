@@ -435,7 +435,7 @@ class MPCController(Node):
 
         self._wait_until_clock_received()
         self._wait_until_odom_received()
-        self._wait_until_control_mode_request_received()
+        # self._wait_until_control_mode_request_received()
         self._wait_until_aw_sim_status_received()
         self._wait_until_trajectory_received()
         self._wait_until_path_constraints_received()
