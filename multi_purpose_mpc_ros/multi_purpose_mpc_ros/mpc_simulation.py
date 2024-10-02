@@ -91,7 +91,7 @@ class MPCSimulation:
             loop += 1
 
             # Get control signals
-            u = mpc.get_control()
+            u, _ = mpc.get_control()
             if len(u) == 0:
                 self.get_logger().error("No control signal", throttle_duration_sec=1)
                 u = [0.0, 0.0]
