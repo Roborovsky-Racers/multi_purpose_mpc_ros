@@ -505,7 +505,7 @@ class MPCController(Node):
 
         self._publish_ref_path_marker(self._car.reference_path)
 
-        self._pred_marker_color = ColorRGBA()
+        self._pred_marker_color = CYAN
 
         t_start = self.get_clock().now()
         last_t = t_start
