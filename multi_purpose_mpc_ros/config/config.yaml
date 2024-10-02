@@ -1,5 +1,5 @@
 sim_logger:
-  animation_enabled: true
+  animation_enabled: false
 
 map:
   # path from pkg share dir
