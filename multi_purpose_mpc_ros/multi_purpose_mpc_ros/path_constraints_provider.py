@@ -30,7 +30,7 @@ from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec, l
 # Project
 from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
 from multi_purpose_mpc_ros.obstacle_manager import ObstacleManager
-from multi_purpose_mpc_ros_msgs.msg import PathConstraints
+from multi_purpose_mpc_ros_msgs.msg import PathConstraints, BorderCells
 
 
 @dataclasses.dataclass
@@ -70,6 +70,7 @@ class PathConstraintsProvider(Node):
         self._timer.destroy() # type: ignore
         self._obstacles_sub.shutdown() # type: ignore
         self._path_constraints_pub.shutdown() # type: ignore
+        self._border_cells_pub.shutdown() # type: ignore
         self._group.destroy() # type: ignore
         super().destroy_node()
 
@@ -91,6 +92,8 @@ class PathConstraintsProvider(Node):
         latching_qos = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
         self._path_constraints_pub = self.create_publisher(
             PathConstraints, "~/path_constraints", latching_qos)
+        self._border_cells_pub = self.create_publisher(
+            BorderCells, "~/border_cells", latching_qos)
 
     def _obstacles_callback(self, msg: Float64MultiArray) -> None:
         obstacles_updated = (self._last_obstacles_msgs_raw != msg.data) and (len(msg.data) > 0)
@@ -187,7 +190,8 @@ class PathConstraintsProvider(Node):
                 mpc_cfg.QN,
                 state_constraints,
                 input_constraints,
-                mpc_cfg.ay_max)
+                mpc_cfg.ay_max,
+                True)
             return mpc_cfg, mpc
 
         def compute_speed_profile(car: BicycleModel, mpc_config: MPCConfig) -> None:
@@ -212,28 +216,47 @@ class PathConstraintsProvider(Node):
 
     def run(self) -> None:
 
-        min_width = self._car.safety_margin * 2.0
         self._path_constraints = PathConstraints()
         self._path_constraints.cols = self._mpc_cfg.N
         self._path_constraints.rows = self._reference_path.n_waypoints - 1
+
+        border_cells = BorderCells()
+        border_cells.cols = self._mpc_cfg.N
+        border_cells.rows = self._reference_path.n_waypoints - 1
+
+        pose = None
 
         rate = self.create_rate(0.5)
         while rclpy.ok():
             self._path_constraints.upper_bounds = []
             self._path_constraints.lower_bounds = []
+            border_cells.dynamic_upper_bounds = []
+            border_cells.dynamic_lower_bounds = []
             for wp_id in range(self._reference_path.n_waypoints-1):
 
                 if self._obstacles_updated:
                     self._obstacles_updated = False
                     self._map.reset_map()
                     self._map.add_obstacles(self._obstacles)
+                    self._reference_path.reset_dynamic_constraints()
 
-                ub_hor, lb_hor, _ = self._car.reference_path.update_path_constraints(
-                    wp_id + 1, self._mpc_cfg.N, min_width, self._car.safety_margin
+                ub_hor, lb_hor, border_cells_hor_sm = self._car.reference_path.update_path_constraints(
+                    wp_id + 1, pose, self._mpc_cfg.N,
+                    self._car.length, self._car.width, self._car.safety_margin
                 )
+                ub_pw, lb_pw = np.array(border_cells_hor_sm[1])
+                pose = (np.array(ub_pw) + np.array(lb_pw)) / 2.
+
                 self._path_constraints.upper_bounds.extend(ub_hor)
                 self._path_constraints.lower_bounds.extend(lb_hor)
+                # if wp_id == 0:
+                #     print("-------------")
+                #     print(border_cells_hor_sm[:,0])
+                #     print("-------------")
+                border_cells.dynamic_upper_bounds.extend(border_cells_hor_sm[:,0].reshape(-1))
+                border_cells.dynamic_lower_bounds.extend(border_cells_hor_sm[:,1].reshape(-1))
             self._path_constraints_pub.publish(self._path_constraints)
+            self._border_cells_pub.publish(border_cells)
             rate.sleep()
 
     @classmethod

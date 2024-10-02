@@ -23,17 +23,23 @@ reference_path:
   csv_path: "maps/optimized_traj_mincurv.csv"
   resolution: 0.6
   smoothing_distance: 3
-  max_width: 5.0
+  max_width: 6.0
   circular: true
+  # use_path_constraints_topic: false
+  # use_border_cells_topic: false
   use_path_constraints_topic: true
+  use_border_cells_topic: true
 
 bicycle_model:
   length: 1.087
-  width: 1.35
+  width: 1.45
 
 mpc:
   N: 20
   Q: [3.0, 140.0, 5.0]  # [v, delta, t]
+  # Q: [3.0, 100.0, 5.0]  # [v, delta, t]
+  # Q: [5.0, 90.0, 5.0]  # [v, delta, t]
+  # Q: [10.0, 80.0, 5.0]  # [v, delta, t]
   R: [0.0, 300.0]      # [v, delta]
   QN: [3.0, 1.5, 5.0]
   v_max: 30.0 # km/h

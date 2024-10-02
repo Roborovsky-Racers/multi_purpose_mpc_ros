@@ -15,6 +15,7 @@ import math
 
 # Colors
 CAR = '#F1C40F'
+CAR_COLLIDING = '#FF0000'
 CAR_OUTLINE = '#B7950B'
 
 
@@ -249,6 +250,8 @@ class SpatialBicycleModel(ABC):
         """
 
         # Model ellipsoid around the car
+        # safety_margin = self.width
+        # safety_margin = self.width / 2.0
         safety_margin = self.width / np.sqrt(2)
         # safety_margin = self.width / np.sqrt(2) / 2.0
         # safety_margin = 0.0
@@ -318,7 +321,7 @@ class SpatialBicycleModel(ABC):
 
         return s_at_closest_wp
 
-    def show(self, ax):
+    def show(self, is_colliding: bool, ax):
         """
         Display car on the provided axis.
         :param ax: Matplotlib axis object to plot on
@@ -328,9 +331,12 @@ class SpatialBicycleModel(ABC):
         cog = (self.temporal_state.x, self.temporal_state.y)
         # Get current angle with respect to x-axis
         yaw = np.rad2deg(self.temporal_state.psi)
+
+        facecolor = CAR_COLLIDING if is_colliding else CAR
+
         # Draw rectangle
         car = plt_patches.Rectangle(cog, width=self.length, height=self.width,
-                                    angle=yaw, facecolor=CAR,
+                                    angle=yaw, facecolor=facecolor,
                                     edgecolor=CAR_OUTLINE, zorder=20)
 
         # Shift center rectangle to match center of the car

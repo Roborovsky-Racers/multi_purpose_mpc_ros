@@ -17,7 +17,7 @@ from rclpy.parameter import Parameter
 from visualization_msgs.msg import Marker, MarkerArray
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 
-from std_msgs.msg import Bool, Float32MultiArray, Float64MultiArray
+from std_msgs.msg import Bool, Float32MultiArray, Float64MultiArray, Int32
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Quaternion, Pose2D, Point
 from std_msgs.msg import ColorRGBA
@@ -37,7 +37,7 @@ from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec, l
 from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
 from multi_purpose_mpc_ros.simulation_logger import SimulationLogger
 from multi_purpose_mpc_ros.obstacle_manager import ObstacleManager
-from multi_purpose_mpc_ros_msgs.msg import AckermannControlBoostCommand, PathConstraints
+from multi_purpose_mpc_ros_msgs.msg import AckermannControlBoostCommand, PathConstraints, BorderCells
 
 def array_to_ackermann_control_command(stamp, u: np.ndarray, acc: float) -> AckermannControlCommand:
     msg = AckermannControlCommand()
@@ -242,7 +242,8 @@ class MPCController(Node):
                 mpc_cfg.QN,
                 state_constraints,
                 input_constraints,
-                mpc_cfg.ay_max)
+                mpc_cfg.ay_max,
+                self._cfg.reference_path.use_path_constraints_topic)
             return mpc_cfg, mpc
 
         def compute_speed_profile(car: BicycleModel, mpc_config: MPCConfig) -> None:
@@ -271,6 +272,10 @@ class MPCController(Node):
         self._last_lap_time = 0.0
         self._lap_times = [None] * (self.MAX_LAPS + 1) # +1 means include lap 0
 
+        # condition
+        self._last_condition = None
+        self._last_colliding_time = None
+
     def _setup_pub_sub(self) -> None:
         # Publishers
         self._command_pub = self.create_publisher(
@@ -294,14 +299,23 @@ class MPCController(Node):
             Odometry, "/localization/kinematic_state", self._odom_callback, 1)
         self._obstacles_sub = self.create_subscription(
             Float64MultiArray, "/aichallenge/objects", self._obstacles_callback, 1)
+            # Float64MultiArray, "/aichallenge/objects2", self._obstacles_callback, 1)
         self._control_mode_request_sub = self.create_subscription(
             Bool, "control/control_mode_request_topic", self._control_mode_request_callback, 1)
         self._trajectory_sub = self.create_subscription(
             Trajectory, "planning/scenario_planning/trajectory", self._trajectory_callback, 1)
         self._awsim_status_sub = self.create_subscription(
             Float32MultiArray, "/aichallenge/awsim/status", self._awsim_status_callback, 1)
-        self._path_constraints_sub = self.create_subscription(
-            PathConstraints, "/path_constraints_provider/path_constraints", self._path_constraints_callback, 1)
+        self._condition_sub = self.create_subscription(
+            Int32, "/aichallenge/pitstop/condition", self._condition_callback, 1)
+
+        if self._cfg.reference_path.use_path_constraints_topic: # type: ignore
+            self._path_constraints_sub = self.create_subscription(
+                PathConstraints, "/path_constraints_provider/path_constraints", self._path_constraints_callback, 1)
+
+        if self._cfg.reference_path.use_border_cells_topic: # type: ignore
+            self._border_cells_sub = self.create_subscription(
+                BorderCells, "/path_constraints_provider/border_cells", self._border_cells_callback, 1)
 
     def _odom_callback(self, msg: Odometry) -> None:
         self._odom = msg
@@ -330,6 +344,10 @@ class MPCController(Node):
         self._reference_path.set_path_constraints(
             msg.upper_bounds, msg.lower_bounds, msg.rows, msg.cols)
 
+    def _border_cells_callback(self, msg: BorderCells):
+        self._reference_path.set_border_cells(
+            msg.dynamic_upper_bounds, msg.dynamic_lower_bounds, msg.rows, msg.cols)
+
     def _trajectory_callback(self, msg):
         self._trajectory = msg
 
@@ -347,6 +365,16 @@ class MPCController(Node):
             self._current_laps = laps
 
         self._last_lap_time = lap_time
+
+    def _condition_callback(self, msg: Int32):
+        if self._last_condition is None:
+            self._last_condition = msg.data
+
+        diff_condition = msg.data - self._last_condition
+        if diff_condition > 30.0:
+            self._last_colliding_time = self.get_clock().now()
+            self.get_logger().warning(f"Collision detected!")
+        self._last_condition = msg.data
 
     def _wait_until_clock_received(self) -> None:
         rate = self.create_rate(10)
@@ -458,7 +486,6 @@ class MPCController(Node):
 
         pose = odom_to_pose_2d(self._odom) # type: ignore
         self._car.update_states(pose.x, pose.y, pose.theta)
-
         self._car.update_reference_path(self._car.reference_path)
 
         sim_logger = SimulationLogger(
@@ -471,12 +498,14 @@ class MPCController(Node):
         kp = 100.0
         last_u = np.array([0.0, 0.0])
 
+        self._current_laps = 1
+
         # for i in range(10):
         #     self._obstacle_manager.push_next_obstacle()
 
         self._publish_ref_path_marker(self._car.reference_path)
 
-        self._pred_marker_color = ColorRGBA()
+        self._pred_marker_color = CYAN
 
         t_start = self.get_clock().now()
         last_t = t_start
@@ -520,6 +549,13 @@ class MPCController(Node):
                 # self.get_logger().info("Obstacles updated")
                 self._map.reset_map()
                 self._map.add_obstacles(self._obstacles)
+                self._reference_path.reset_dynamic_constraints()
+
+            is_colliding = False
+            if self._last_colliding_time is not None:
+                elapsed_from_last_colliding = (now - self._last_colliding_time).nanoseconds / 1e9
+                if elapsed_from_last_colliding < 5.0:
+                    is_colliding = True
 
             pose = odom_to_pose_2d(self._odom) # type: ignore
             v = self._odom.twist.twist.linear.x
@@ -533,7 +569,8 @@ class MPCController(Node):
 
             if len(u) == 0:
                 self.get_logger().error("No control signal", throttle_duration_sec=1)
-                continue
+                u = [0.0, 0.0]
+                # continue
 
             acc = 0.
             bug_acc_enabled = False
@@ -571,13 +608,11 @@ class MPCController(Node):
 
             # Log states
             sim_logger.log(self._car, u, t)
-            sim_logger.plot_animation(t, loop, self._current_laps, self._lap_times, u, self._mpc, self._car)
-
+            sim_logger.plot_animation(t, loop, self._current_laps, self._lap_times, is_colliding, u, self._mpc, self._car)
 
             # 約 0.25 秒ごとに予測結果を表示
-            # if loop % (self._mpc_cfg.control_rate // 4) == 0:
-            #     self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
-            self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
+            if (self._mpc.current_prediction is not None) and (loop % (self._mpc_cfg.control_rate // 4) == 0):
+                self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
 
 
         # show results
