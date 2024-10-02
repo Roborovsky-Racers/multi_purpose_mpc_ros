@@ -1,3 +1,4 @@
+from typing import Tuple
 import numpy as np
 import osqp
 from scipy import sparse
@@ -165,7 +166,7 @@ class MPC:
         self.optimizer = osqp.OSQP()
         self.optimizer.setup(P=P, q=q, A=A, l=l, u=u, verbose=False)
 
-    def get_control(self) -> np.ndarray:
+    def get_control(self) -> Tuple[np.ndarray, float]:
         """
         Get control signal given the current position of the car. Solves a
         finite time optimization problem based on the linearized car model.
@@ -204,6 +205,9 @@ class MPC:
             v = control_signals[0]
             delta = control_signals[1]
 
+            # max delta in prediction horizon
+            max_delta = np.max(np.abs(control_signals[1:len(control_signals) // 3 * 2:2]))
+
             # Update control signals
             self.current_control = control_signals
 
@@ -224,6 +228,7 @@ class MPC:
             #       ' control signal used!')
             id = nu * (self.infeasibility_counter + 1)
             u = np.array(self.current_control[id:id+2])
+            max_delta = np.abs(u[1])
 
             # increase infeasibility counter
             self.infeasibility_counter += 1
@@ -232,7 +237,7 @@ class MPC:
         #     print('No control signal computed!')
         #     exit(1)
 
-        return u
+        return u, max_delta
 
     def update_prediction(self, spatial_state_prediction, N):
         """

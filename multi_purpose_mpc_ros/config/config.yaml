@@ -33,7 +33,7 @@ bicycle_model:
 
 mpc:
   N: 20
-  Q: [3.0, 100.0, 5.0]  # [v, delta, t]
+  Q: [3.0, 140.0, 5.0]  # [v, delta, t]
   R: [0.0, 300.0]      # [v, delta]
   QN: [3.0, 1.5, 5.0]
   v_max: 40.0 # km/h
@@ -41,6 +41,6 @@ mpc:
   a_max: 3.2 # m/s^2
   ay_max: 50.0 # m/s^2, maximum lateral acceleration in curves
   delta_max_deg: 80.0 # degrees
-  control_rate: 50.0 # Hz
+  control_rate: 40.0 # Hz
 
 
