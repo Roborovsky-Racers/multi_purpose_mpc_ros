@@ -37,6 +37,7 @@ from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec, l
 from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
 from multi_purpose_mpc_ros.simulation_logger import SimulationLogger
 from multi_purpose_mpc_ros.obstacle_manager import ObstacleManager
+from multi_purpose_mpc_ros.exexution_stats import ExecutionStats
 from multi_purpose_mpc_ros_msgs.msg import AckermannControlBoostCommand, PathConstraints, BorderCells
 
 def array_to_ackermann_control_command(stamp, u: np.ndarray, acc: float) -> AckermannControlCommand:
@@ -296,6 +297,9 @@ class MPCController(Node):
         # condition
         self._last_condition = None
         self._last_colliding_time = None
+
+        # stats
+        self._stats = ExecutionStats(window_size=50, record_count_threshold=100)
 
     def _setup_pub_sub(self) -> None:
         # Publishers
@@ -558,6 +562,8 @@ class MPCController(Node):
         last_t = t_start
 
         while rclpy.ok() and (not sim_logger.stop_requested()) and self._current_laps <= self.MAX_LAPS:
+            self._stats.record()
+
             # self.get_logger().info("loop")
             control_rate.sleep()
 
@@ -611,8 +617,9 @@ class MPCController(Node):
             # print(f"car x: {self._car.temporal_state.x}, y: {self._car.temporal_state.y}, psi: {self._car.temporal_state.psi}")
             # print(f"mpc x: {self._mpc.model.temporal_state.x}, y: {self._mpc.model.temporal_state.y}, psi: {self._mpc.model.temporal_state.psi}")
 
-            u, max_delta = self._mpc.get_control()
-            # self.get_logger().info(f"u: {u}")
+            with self._stats.time_block("control"):
+                u, max_delta = self._mpc.get_control()
+                # self.get_logger().info(f"u: {u}")
 
             if len(u) == 0:
                 self.get_logger().error("No control signal", throttle_duration_sec=1)
