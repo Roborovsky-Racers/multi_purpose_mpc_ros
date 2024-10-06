@@ -17,7 +17,7 @@ from rclpy.parameter import Parameter
 from visualization_msgs.msg import Marker, MarkerArray
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 
-from std_msgs.msg import Bool, Float32MultiArray, Float64MultiArray, Int32
+from std_msgs.msg import Empty, Bool, Float32MultiArray, Float64MultiArray, Int32
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Quaternion, Pose2D, Point
 from std_msgs.msg import ColorRGBA
@@ -115,7 +115,7 @@ class MPCController(Node):
 
         self._cfg = self._load_config(config_path)
         self._odom: Optional[Odometry] = None
-        self._enable_control = None
+        self._enable_control = True
         self._initialize()
         self._setup_pub_sub()
 
@@ -337,6 +337,8 @@ class MPCController(Node):
             Float32MultiArray, "/aichallenge/awsim/status", self._awsim_status_callback, 1)
         self._condition_sub = self.create_subscription(
             Int32, "/aichallenge/pitstop/condition", self._condition_callback, 1)
+        self._stop_request_sub = self.create_subscription(
+            Empty, "/control/mpc/stop_request", self._stop_request_callback, 1)
 
         if self.USE_OBSTACLE_AVOIDANCE:
             self._obstacles_sub = self.create_subscription(
@@ -381,7 +383,7 @@ class MPCController(Node):
             self._obstacles_updated = True
 
     def _control_mode_request_callback(self, msg):
-        if msg.data:
+        if msg.data and not self._enable_control:
             self.get_logger().info("Control mode request received")
             self._enable_control = True
 
@@ -420,6 +422,11 @@ class MPCController(Node):
             self._last_colliding_time = self.get_clock().now()
             self.get_logger().warning(f"Collision detected!")
         self._last_condition = msg.data
+
+    def _stop_request_callback(self, msg: Empty) -> None:
+        if self._enable_control:
+            self.get_logger().warn(f"Stop request received {self._enable_control}")
+            self._enable_control = False
 
     def _wait_until_clock_received(self) -> None:
         if self.use_sim_time:
@@ -625,6 +632,15 @@ class MPCController(Node):
                 u, max_delta = self._mpc.get_control()
                 # self.get_logger().info(f"u: {u}")
 
+            # override by brake command if control is disabled
+            if not self._enable_control:
+                last_v_cmd = last_u[0]
+                if last_v_cmd < 0.5:
+                    u[0] = 0.0
+                else:
+                    decel_v = last_v_cmd + self._mpc_cfg.a_min * dt
+                    u[0] = np.clip(decel_v, 0.0, self._mpc_cfg.v_max)
+
             if len(u) == 0:
                 self.get_logger().error("No control signal", throttle_duration_sec=1)
                 u = [0.0, 0.0]
@@ -654,12 +670,11 @@ class MPCController(Node):
                 # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
                 acc = np.clip(acc, self._mpc_cfg.a_min, self._mpc_cfg.a_max)
             # u[0] = np.clip(last_u[0] + acc * dt, 0.0, self._mpc_cfg.v_max)
-            u[0] = v
             last_u[0] = u[0]
             last_u[1] = u[1]
 
-
-            self._car.drive(u)
+            # update car state (use v for feedback actual speed)
+            self._car.drive([v, u[1]])
 
             # Publish control command
             cmd = self._create_ackerman_control_command(now, u, acc, bug_acc_enabled)
