@@ -562,7 +562,8 @@ class MPCController(Node):
         last_t = t_start
 
         while rclpy.ok() and (not sim_logger.stop_requested()) and self._current_laps <= self.MAX_LAPS:
-            self._stats.record()
+            # record and print execution stats
+            # self._stats.record()
 
             # self.get_logger().info("loop")
             control_rate.sleep()
