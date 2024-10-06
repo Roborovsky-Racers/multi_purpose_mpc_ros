@@ -262,7 +262,8 @@ class MPCController(Node):
                 state_constraints,
                 input_constraints,
                 mpc_cfg.ay_max,
-                self.USE_OBSTACLE_AVOIDANCE and self._cfg.reference_path.use_path_constraints_topic)
+                self.USE_OBSTACLE_AVOIDANCE,
+                self._cfg.reference_path.use_path_constraints_topic)
             return mpc_cfg, mpc
 
         def compute_speed_profile(car: BicycleModel, mpc_config: MPCConfig) -> None:
