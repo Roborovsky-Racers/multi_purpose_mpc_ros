@@ -695,7 +695,8 @@ class MPCController(Node):
         self.get_logger().warn("----------------------")
         self.get_logger().warn("Stopping...")
         self.get_logger().warn("----------------------")
-        while self._odom.twist.twist.linear.x > 0.1:
+        timeout_time = self.get_clock().now() + rclpy.time.Duration(seconds=5)
+        while self._odom.twist.twist.linear.x > 0.1 and self.get_clock().now() < timeout_time:
             self._enable_control = False
             self._control()
 
