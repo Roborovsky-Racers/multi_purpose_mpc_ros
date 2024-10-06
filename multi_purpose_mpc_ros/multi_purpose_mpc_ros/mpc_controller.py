@@ -340,7 +340,7 @@ class MPCController(Node):
         # self._mpc_pred_pub = self.create_publisher(
         #     MarkerArray, "/mpc/prediction", 1)
         self._mpc_pred_pub = self.create_publisher(
-            MarkerArray, "/localization/pose_estimator/monte_carlo_initial_pose_marker", 1)
+            MarkerArray, "/planning/scenario_planning/lane_driving/motion_planning/obstacle_stop_planner/virtual_wall", 1)
 
         latching_qos = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
         # NOTE:評価環境での可視化のためにダミーのトピック名を使用
