@@ -28,6 +28,7 @@ def main(argv = sys.argv) -> None:
     except KeyboardInterrupt:
         node.get_logger().info("Shutdown requested")
     finally:
+        node.stop()
         rclpy.shutdown()
         for node in executor._nodes:
             node.destroy_node()

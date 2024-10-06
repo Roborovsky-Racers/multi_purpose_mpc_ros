@@ -32,7 +32,8 @@ reference_path:
 
 bicycle_model:
   length: 1.087
-  width: 1.45
+  # width: 1.45   # real machine width
+  width: 2.00   # +safety margin
 
 mpc:
   N: 20

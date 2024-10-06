@@ -69,7 +69,7 @@ class MPC:
                 self.model.width,
                 self.model.safety_margin)
 
-    def _init_problem(self, N):
+    def _init_problem(self, N, safety_margin, force_update_dynamic_constraints=False):
         """
         Initialize optimization problem for current time step.
         """
@@ -127,14 +127,14 @@ class MPC:
             umax_dyn[self.nu*n] = min(vmax_dyn, umax_dyn[self.nu*n])
 
         # Update path constraints
-        if self.use_obstacle_avoidance and not self.use_path_constraints_topic:
+        if force_update_dynamic_constraints or (self.use_obstacle_avoidance and not self.use_path_constraints_topic):
             ub, lb, _ = self.model.reference_path.update_path_constraints(
                 self.model.wp_id + 1,
                 [self.model.temporal_state.x, self.model.temporal_state.y, self.model.temporal_state.psi],
                 N,
                 self.model.length,
                 self.model.width,
-                self.model.safety_margin)
+                safety_margin)
         else:
             ub = self.model.reference_path.path_constraints[0][self.model.wp_id]
             lb = self.model.reference_path.path_constraints[1][self.model.wp_id]
@@ -204,7 +204,7 @@ class MPC:
             self.model.current_waypoint)
 
         # Initialize optimization problem
-        self._init_problem(N)
+        self._init_problem(N, self.model.safety_margin)
 
         # Solve optimization problem
         dec = self.optimizer.solve()
@@ -212,6 +212,23 @@ class MPC:
         try:
             # Get control signals
             control_signals = np.array(dec.x[-N*nu:])
+            use_control_signals = control_signals[1::2]
+
+            if not np.all(use_control_signals):
+                for i in range(1, 6):
+                    relaxed_safety_margin = self.model.safety_margin * ((5-i) / 5.0)
+                    self._init_problem(N, relaxed_safety_margin, force_update_dynamic_constraints=True)
+                    dec = self.optimizer.solve()
+                    control_signals = np.array(dec.x[-N*nu:])
+                    use_control_signals = control_signals[1::2]
+
+                    if self.infeasibility_counter == 0:
+                        if np.all(use_control_signals):
+                            print(f"Relaxed safety margin by {relaxed_safety_margin} ({5-i}/5) to solve the problem")
+                            break
+                        else:
+                            print(f"Relaxed safety margin by {relaxed_safety_margin} ({5-i}/5) did not solve the problem")
+
             control_signals[1::2] = np.arctan(control_signals[1::2] *
                                               self.model.length)
             v = control_signals[0]
@@ -233,21 +250,26 @@ class MPC:
             u = np.array([v, delta])
 
             # if problem solved, reset infeasibility counter
+            if self.infeasibility_counter > (N - 1):
+                print(f'Problem solved after {self.infeasibility_counter} infeasible iterations')
             self.infeasibility_counter = 0
 
         except Exception as e:
             # print('Infeasible problem. Previously predicted'
             #       ' control signal used!')
             id = nu * (self.infeasibility_counter + 1)
-            u = np.array(self.current_control[id:id+2])
-            max_delta = np.abs(u[1])
+            if id + 2 < len(self.current_control):
+                u = np.array(self.current_control[id:id+2])
+                max_delta = np.abs(u[1])
+            else:
+                u = np.array([0.0, 0.0])
+                max_delta = 0.0
 
             # increase infeasibility counter
             self.infeasibility_counter += 1
 
-        # if self.infeasibility_counter == (N - 1):
-        #     print('No control signal computed!')
-        #     exit(1)
+        if self.infeasibility_counter > (N - 1) and self.infeasibility_counter % N == 0:
+            print('No control signal computed!')
 
         return u, max_delta
 

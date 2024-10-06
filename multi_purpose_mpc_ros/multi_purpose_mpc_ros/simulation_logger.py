@@ -118,6 +118,8 @@ class SimulationLogger:
     def show_results(self, current_laps, lap_times, car):
         last_laps = current_laps - 1
         valid_lap_times = [lap_time for lap_time in lap_times if lap_time is not None]
+        if len(valid_lap_times) == 0:
+            valid_lap_times = [0]
         total_time = sum(valid_lap_times)
         ave_lap_time = total_time / len(valid_lap_times) if len(valid_lap_times) > 0 else 0
         fastest_lap_time = min(valid_lap_times)

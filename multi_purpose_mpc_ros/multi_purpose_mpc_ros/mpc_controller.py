@@ -17,7 +17,7 @@ from rclpy.parameter import Parameter
 from visualization_msgs.msg import Marker, MarkerArray
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 
-from std_msgs.msg import Bool, Float32MultiArray, Float64MultiArray, Int32
+from std_msgs.msg import Empty, Bool, Float32MultiArray, Float64MultiArray, Int32
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Quaternion, Pose2D, Point
 from std_msgs.msg import ColorRGBA
@@ -39,6 +39,23 @@ from multi_purpose_mpc_ros.simulation_logger import SimulationLogger
 from multi_purpose_mpc_ros.obstacle_manager import ObstacleManager
 from multi_purpose_mpc_ros.exexution_stats import ExecutionStats
 from multi_purpose_mpc_ros_msgs.msg import AckermannControlBoostCommand, PathConstraints, BorderCells
+
+
+RED = ColorRGBA()
+RED.a = 1.0
+RED.r = 1.0
+RED.g = 0.0
+RED.b = 0.0
+YELLOW = ColorRGBA()
+YELLOW.a = 1.0
+YELLOW.r = 1.0
+YELLOW.g = 1.0
+YELLOW.b = 0.0
+CYAN = ColorRGBA()
+CYAN.a = 1.0
+CYAN.r = 0.0
+CYAN.g = 156.0 / 255.0
+CYAN.b = 209.0 / 255.0
 
 def array_to_ackermann_control_command(stamp, u: np.ndarray, acc: float) -> AckermannControlCommand:
     msg = AckermannControlCommand()
@@ -99,6 +116,12 @@ class MPCController(Node):
     BUG_VEL = 40.0 # km/h
     BUG_ACC = 400.0
 
+    SHOW_PLOT_ANIMATION = False
+    PLOT_RESULTS = False
+    ANIMATION_INTERVAL = 20
+
+    KP = 100.0
+
     def __init__(self, config_path: str) -> None:
         super().__init__("mpc_controller") # type: ignore
 
@@ -115,7 +138,7 @@ class MPCController(Node):
 
         self._cfg = self._load_config(config_path)
         self._odom: Optional[Odometry] = None
-        self._enable_control = None
+        self._enable_control = True
         self._initialize()
         self._setup_pub_sub()
 
@@ -301,7 +324,7 @@ class MPCController(Node):
         self._last_colliding_time = None
 
         # stats
-        self._stats = ExecutionStats(window_size=50, record_count_threshold=100)
+        self._stats = ExecutionStats(self.get_logger(), window_size=50, record_count_threshold=1000)
 
     def _setup_pub_sub(self) -> None:
         # Publishers
@@ -317,7 +340,7 @@ class MPCController(Node):
         # self._mpc_pred_pub = self.create_publisher(
         #     MarkerArray, "/mpc/prediction", 1)
         self._mpc_pred_pub = self.create_publisher(
-            MarkerArray, "/localization/pose_estimator/monte_carlo_initial_pose_marker", 1)
+            MarkerArray, "/planning/scenario_planning/lane_driving/motion_planning/obstacle_stop_planner/virtual_wall", 1)
 
         latching_qos = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
         # NOTE:評価環境での可視化のためにダミーのトピック名を使用
@@ -337,6 +360,8 @@ class MPCController(Node):
             Float32MultiArray, "/aichallenge/awsim/status", self._awsim_status_callback, 1)
         self._condition_sub = self.create_subscription(
             Int32, "/aichallenge/pitstop/condition", self._condition_callback, 1)
+        self._stop_request_sub = self.create_subscription(
+            Empty, "/control/mpc/stop_request", self._stop_request_callback, 1)
 
         if self.USE_OBSTACLE_AVOIDANCE:
             self._obstacles_sub = self.create_subscription(
@@ -381,7 +406,7 @@ class MPCController(Node):
             self._obstacles_updated = True
 
     def _control_mode_request_callback(self, msg):
-        if msg.data:
+        if msg.data and not self._enable_control:
             self.get_logger().info("Control mode request received")
             self._enable_control = True
 
@@ -421,6 +446,11 @@ class MPCController(Node):
             self.get_logger().warning(f"Collision detected!")
         self._last_condition = msg.data
 
+    def _stop_request_callback(self, msg: Empty) -> None:
+        if self._enable_control:
+            self.get_logger().warn(f"Stop request received {self._enable_control}")
+            self._enable_control = False
+
     def _wait_until_clock_received(self) -> None:
         if self.use_sim_time:
             self.get_logger().info(f"wait until clock received...")
@@ -444,7 +474,7 @@ class MPCController(Node):
 
         self.get_logger().info(f">> OK!")
 
-    def _wait_until_aw_sim_status_received(self, timeout: float = 30.) -> None:
+    def _wait_until_awsim_status_received(self, timeout: float = 30.) -> None:
         if self.use_sim_time:
             self._wait_until_message_received(lambda: self._current_laps, 'AWSIM status', timeout)
 
@@ -506,176 +536,178 @@ class MPCController(Node):
             ref_path_marker_array.markers.append(m) # type: ignore
         self._ref_path_pub.publish(ref_path_marker_array)
 
+    def _control(self):
+        now = self.get_clock().now()
+        t = (now - self._t_start).nanoseconds / 1e9
+        dt = (now - self._last_t).nanoseconds / 1e9
+
+        self._last_t = now
+        self._loop += 1
+
+        # record and print execution stats
+        if self.use_stats:
+            self._stats.record()
+
+        # self.get_logger().info("loop")
+        self._control_rate.sleep()
+
+        if self._loop % 100 == 0:
+            # update obstacles
+            if self.USE_OBSTACLE_AVOIDANCE and not self._use_obstacles_topic:
+                # self._obstacle_manager.push_next_obstacle()
+                self._obstacles = self._obstacle_manager.current_obstacles
+                self._obstacles_updated = True
+
+            # update reference path
+            if self._cfg.reference_path.update_by_topic: # type: ignore
+                new_referece_path = self._create_reference_path_from_autoware_trajectory(self._trajectory)
+                if new_referece_path is not None:
+                    self._car.reference_path = new_referece_path
+                    self._car.update_reference_path(self._car.reference_path)
+
+            def plot_reference_path(car):
+                import matplotlib.pyplot as plt
+                import sys
+                fig, ax = plt.subplots(1, 1)
+                car.reference_path.show(ax)
+                plt.show()
+                sys.exit(1)
+            # plot_reference_path(self._car)
+
+        if self.USE_OBSTACLE_AVOIDANCE and self._obstacles_updated:
+            self._obstacles_updated = False
+            # self.get_logger().info("Obstacles updated")
+            self._map.reset_map()
+            self._map.add_obstacles(self._obstacles)
+            self._reference_path.reset_dynamic_constraints()
+
+        is_colliding = False
+        if self._last_colliding_time is not None:
+            elapsed_from_last_colliding = (now - self._last_colliding_time).nanoseconds / 1e9
+            if elapsed_from_last_colliding < 5.0:
+                is_colliding = True
+
+        pose = odom_to_pose_2d(self._odom) # type: ignore
+        v = self._odom.twist.twist.linear.x
+
+        self._car.update_states(pose.x, pose.y, pose.theta)
+        # print(f"car x: {self._car.temporal_state.x}, y: {self._car.temporal_state.y}, psi: {self._car.temporal_state.psi}")
+        # print(f"mpc x: {self._mpc.model.temporal_state.x}, y: {self._mpc.model.temporal_state.y}, psi: {self._mpc.model.temporal_state.psi}")
+
+        with self._stats.time_block("control"):
+            u, max_delta = self._mpc.get_control()
+            # self.get_logger().info(f"u: {u}")
+
+        # override by brake command if control is disabled
+        if not self._enable_control:
+            last_v_cmd = self._last_u[0]
+            if last_v_cmd < 0.5:
+                u[0] = 0.0
+            else:
+                decel_v = last_v_cmd + self._mpc_cfg.a_min * dt
+                u[0] = np.clip(decel_v, 0.0, self._mpc_cfg.v_max)
+
+        if len(u) == 0:
+            self.get_logger().error("No control signal", throttle_duration_sec=1)
+            u = [0.0, 0.0]
+            # continue
+
+        acc = 0.
+        bug_acc_enabled = False
+        if self.USE_BUG_ACC:
+            def deg2rad(deg):
+                return deg * np.pi / 180.0
+
+            if abs(v) > kmh_to_m_per_sec(44.0) or \
+             (abs(v) > kmh_to_m_per_sec(38.0) and abs(max_delta) > deg2rad(12.0)):
+                bug_acc_enabled = False
+                acc = self._mpc_cfg.a_min / 3.0 * 2.0
+                self._pred_marker_color = RED
+            elif abs(v) > kmh_to_m_per_sec(41.0) or abs(u[1]) > deg2rad(10.0):
+                bug_acc_enabled = False
+                acc = self._mpc_cfg.a_max
+                self._pred_marker_color = YELLOW
+            else:
+                bug_acc_enabled = True
+                acc = 500.0
+                self._pred_marker_color = CYAN
+        else:
+            acc =  self.KP * (u[0] - v)
+            # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
+            acc = np.clip(acc, self._mpc_cfg.a_min, self._mpc_cfg.a_max)
+        # u[0] = np.clip(last_u[0] + acc * dt, 0.0, self._mpc_cfg.v_max)
+        self._last_u[0] = u[0]
+        self._last_u[1] = u[1]
+
+        # update car state (use v for feedback actual speed)
+        self._car.drive([v, u[1]])
+
+        # Publish control command
+        cmd = self._create_ackerman_control_command(now, u, acc, bug_acc_enabled)
+        self._command_pub.publish(cmd)
+
+        # Log states
+        self._sim_logger.log(self._car, u, t)
+        self._sim_logger.plot_animation(t, self._loop, self._current_laps, self._lap_times, is_colliding, u, self._mpc, self._car)
+
+        # 約 0.25 秒ごとに予測結果を表示
+        if (self._mpc.current_prediction is not None) and (self._loop % (self._mpc_cfg.control_rate // 4) == 0):
+            self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
+
     def run(self) -> None:
-        SHOW_PLOT_ANIMATION = False
-        PLOT_RESULTS = False
-        ANIMATION_INTERVAL = 20
-
-        RED = ColorRGBA()
-        RED.a = 1.0
-        RED.r = 1.0
-        RED.g = 0.0
-        RED.b = 0.0
-        YELLOW = ColorRGBA()
-        YELLOW.a = 1.0
-        YELLOW.r = 1.0
-        YELLOW.g = 1.0
-        YELLOW.b = 0.0
-        CYAN = ColorRGBA()
-        CYAN.a = 1.0
-        CYAN.r = 0.0
-        CYAN.g = 156.0 / 255.0
-        CYAN.b = 209.0 / 255.0
-
         self._wait_until_clock_received()
-        self._wait_until_aw_sim_status_received()
+        self._wait_until_awsim_status_received()
         self._wait_until_odom_received()
         self._wait_until_trajectory_received()
         self._wait_until_path_constraints_received()
 
-        control_rate = self.create_rate(self._mpc_cfg.control_rate)
-
+        # initialize car states
         pose = odom_to_pose_2d(self._odom) # type: ignore
         self._car.update_states(pose.x, pose.y, pose.theta)
         self._car.update_reference_path(self._car.reference_path)
 
-        sim_logger = SimulationLogger(
-            self.get_logger(),
-            self._car.temporal_state.x, self._car.temporal_state.y, self._cfg.sim_logger.animation_enabled, SHOW_PLOT_ANIMATION, PLOT_RESULTS, ANIMATION_INTERVAL) # type: ignore
-
-        self.get_logger().info(f"------")
-        self.get_logger().info(f"START!")
-        self.get_logger().info(f"------")
-
-        loop = 0
-        kp = 100.0
-        last_u = np.array([0.0, 0.0])
-
-        self._current_laps = 1
+        self._publish_ref_path_marker(self._car.reference_path)
+        self._pred_marker_color = CYAN
 
         # for i in range(10):
         #     self._obstacle_manager.push_next_obstacle()
 
-        self._publish_ref_path_marker(self._car.reference_path)
+        # initialize control states
+        self._control_rate = self.create_rate(self._mpc_cfg.control_rate)
+        self._sim_logger = SimulationLogger(
+            self.get_logger(),
+            self._car.temporal_state.x, self._car.temporal_state.y, self._cfg.sim_logger.animation_enabled, self.SHOW_PLOT_ANIMATION, self.PLOT_RESULTS, self.ANIMATION_INTERVAL) # type: ignore
 
-        self._pred_marker_color = CYAN
+        self._loop = 0
+        self._last_u = np.array([0.0, 0.0])
+        self._t_start = self.get_clock().now()
+        self._last_t = self._t_start
 
-        t_start = self.get_clock().now()
-        last_t = t_start
+        self.get_logger().info("----------------------")
+        self.get_logger().info("START!")
+        self.get_logger().info("----------------------")
 
-        while rclpy.ok() and (not sim_logger.stop_requested()) and self._current_laps <= self.MAX_LAPS:
-            # record and print execution stats
-            if self.use_stats:
-                self._stats.record()
+        while rclpy.ok() and (not self._sim_logger.stop_requested()) and self._current_laps <= self.MAX_LAPS:
+            self._control()
 
-            # self.get_logger().info("loop")
-            control_rate.sleep()
+    def stop(self):
+        # Wait for stopping
+        self.get_logger().warn("----------------------")
+        self.get_logger().warn("Stopping...")
+        self.get_logger().warn("----------------------")
+        timeout_time = self.get_clock().now() + rclpy.time.Duration(seconds=5)
+        while self._odom.twist.twist.linear.x > 0.1 and self.get_clock().now() < timeout_time:
+            self._enable_control = False
+            self._control()
 
-            if loop % 100 == 0:
-                # update obstacles
-                if self.USE_OBSTACLE_AVOIDANCE and not self._use_obstacles_topic:
-                    # self._obstacle_manager.push_next_obstacle()
-                    self._obstacles = self._obstacle_manager.current_obstacles
-                    self._obstacles_updated = True
+        # Publish zero command
+        zero_cmd = self._create_ackerman_control_command(self.get_clock().now(), [0.0, 0.0], 0.0, False)
+        self._command_pub.publish(zero_cmd)
 
-                # update reference path
-                if self._cfg.reference_path.update_by_topic: # type: ignore
-                    new_referece_path = self._create_reference_path_from_autoware_trajectory(self._trajectory)
-                    if new_referece_path is not None:
-                        self._car.reference_path = new_referece_path
-                        self._car.update_reference_path(self._car.reference_path)
-
-                def plot_reference_path(car):
-                    import matplotlib.pyplot as plt
-                    import sys
-                    fig, ax = plt.subplots(1, 1)
-                    car.reference_path.show(ax)
-                    plt.show()
-                    sys.exit(1)
-                # plot_reference_path(self._car)
-
-            loop += 1
-
-            now = self.get_clock().now()
-            t = (now - t_start).nanoseconds / 1e9
-            dt = (now - last_t).nanoseconds / 1e9
-            last_t = now
-
-            if self.USE_OBSTACLE_AVOIDANCE and self._obstacles_updated:
-                self._obstacles_updated = False
-                # self.get_logger().info("Obstacles updated")
-                self._map.reset_map()
-                self._map.add_obstacles(self._obstacles)
-                self._reference_path.reset_dynamic_constraints()
-
-            is_colliding = False
-            if self._last_colliding_time is not None:
-                elapsed_from_last_colliding = (now - self._last_colliding_time).nanoseconds / 1e9
-                if elapsed_from_last_colliding < 5.0:
-                    is_colliding = True
-
-            pose = odom_to_pose_2d(self._odom) # type: ignore
-            v = self._odom.twist.twist.linear.x
-
-            self._car.update_states(pose.x, pose.y, pose.theta)
-            # print(f"car x: {self._car.temporal_state.x}, y: {self._car.temporal_state.y}, psi: {self._car.temporal_state.psi}")
-            # print(f"mpc x: {self._mpc.model.temporal_state.x}, y: {self._mpc.model.temporal_state.y}, psi: {self._mpc.model.temporal_state.psi}")
-
-            with self._stats.time_block("control"):
-                u, max_delta = self._mpc.get_control()
-                # self.get_logger().info(f"u: {u}")
-
-            if len(u) == 0:
-                self.get_logger().error("No control signal", throttle_duration_sec=1)
-                u = [0.0, 0.0]
-                # continue
-
-            acc = 0.
-            bug_acc_enabled = False
-            if self.USE_BUG_ACC:
-                def deg2rad(deg):
-                    return deg * np.pi / 180.0
-
-                if abs(v) > kmh_to_m_per_sec(44.0) or \
-                 (abs(v) > kmh_to_m_per_sec(38.0) and abs(max_delta) > deg2rad(12.0)):
-                    bug_acc_enabled = False
-                    acc = self._mpc_cfg.a_min / 3.0 * 2.0
-                    self._pred_marker_color = RED
-                elif abs(v) > kmh_to_m_per_sec(41.0) or abs(u[1]) > deg2rad(10.0):
-                    bug_acc_enabled = False
-                    acc = self._mpc_cfg.a_max
-                    self._pred_marker_color = YELLOW
-                else:
-                    bug_acc_enabled = True
-                    acc = 500.0
-                    self._pred_marker_color = CYAN
-            else:
-                acc =  kp * (u[0] - v)
-                # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
-                acc = np.clip(acc, self._mpc_cfg.a_min, self._mpc_cfg.a_max)
-            # u[0] = np.clip(last_u[0] + acc * dt, 0.0, self._mpc_cfg.v_max)
-            u[0] = v
-            last_u[0] = u[0]
-            last_u[1] = u[1]
-
-
-            self._car.drive(u)
-
-            # Publish control command
-            cmd = self._create_ackerman_control_command(now, u, acc, bug_acc_enabled)
-            self._command_pub.publish(cmd)
-
-            # Log states
-            sim_logger.log(self._car, u, t)
-            sim_logger.plot_animation(t, loop, self._current_laps, self._lap_times, is_colliding, u, self._mpc, self._car)
-
-            # 約 0.25 秒ごとに予測結果を表示
-            if (self._mpc.current_prediction is not None) and (loop % (self._mpc_cfg.control_rate // 4) == 0):
-                self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
-
+        self.get_logger().warn(">> Stop Completed!")
 
         # show results
-        sim_logger.show_results(self._current_laps, self._lap_times, self._car)
+        self._sim_logger.show_results(self._current_laps, self._lap_times, self._car)
 
     @classmethod
     def in_pkg_share(cls, file_path: str) -> str:
