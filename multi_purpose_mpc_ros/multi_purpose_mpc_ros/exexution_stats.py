@@ -2,8 +2,13 @@ import time
 from collections import defaultdict
 from contextlib import contextmanager
 
+import rclpy
+import rclpy.node
+
 class ExecutionStats:
-    def __init__(self, window_size=10, record_count_threshold=5):
+    def __init__(self, logger, window_size=10, record_count_threshold=5):
+        self.logger = logger
+
         # Window size (number of periods to keep track of)
         self.window_size = window_size
         # Threshold for how many records before printing stats
@@ -123,7 +128,7 @@ class ExecutionStats:
         max_period_ms = stats['max_period'] * 1000 if stats['max_period'] is not None else 0
 
         # Print execution period stats
-        print(f"Ave: {stats['average_rate']:.2f} Hz ({avg_period_ms:.2f} ms), "
+        self.logger.info(f"Ave: {stats['average_rate']:.2f} Hz ({avg_period_ms:.2f} ms), "
               f"Min: {stats['min_rate']:.2f} Hz ({max_period_ms:.2f} ms), "
               f"Max: {stats['max_rate']:.2f} Hz ({min_period_ms:.2f} ms)")
         
@@ -133,12 +138,15 @@ class ExecutionStats:
             avg_time_ms = exec_stats['average_time'] * 1000 if exec_stats['average_time'] is not None else 0
             min_time_ms = exec_stats['min_time'] * 1000 if exec_stats['min_time'] is not None else 0
             max_time_ms = exec_stats['max_time'] * 1000 if exec_stats['max_time'] is not None else 0
-            print(f"  [{label}] Ave: {avg_time_ms:.2f} ms, Min: {min_time_ms:.2f} ms, Max: {max_time_ms:.2f} ms")
+            self.logger.info(f"  [{label}] Ave: {avg_time_ms:.2f} ms, Min: {min_time_ms:.2f} ms, Max: {max_time_ms:.2f} ms")
 
 # Usage example:
 def main(args=None):
+    rclpy.init(args=args)
+    node = rclpy.node.Node("execution_stats_example")
+
     # Create an instance of the stats collection class with a threshold of 5
-    stats = ExecutionStats(window_size=10, record_count_threshold=5)
+    stats = ExecutionStats(node.get_logger(), window_size=10, record_count_threshold=5)
 
     # Inside the periodic execution process, call stats.record()
     for _ in range(15):  # Simulate 15 periodic executions
@@ -153,6 +161,8 @@ def main(args=None):
         stats.start_timer('process_manual')
         time.sleep(0.02)  # Simulate another process execution time
         stats.stop_timer('process_manual')
+
+    rclpy.shutdown()
 
 if __name__ == "__main__":
     main()
