@@ -705,6 +705,25 @@ class ReferencePath:
 
         return free_segments
 
+    def update_simple_path_constraints(self, N, model_length, model_width, safety_margin):
+        upper_bounds = []
+        lower_bounds = []
+        pose = None
+
+        for wp_id in range(self.n_waypoints-1):
+            ub_hor, lb_hor, border_cells_hor_sm = self.update_path_constraints(
+                wp_id + 1, pose, N,
+                model_length, model_width, safety_margin
+            )
+            ub_pw, lb_pw = np.array(border_cells_hor_sm[1])
+            pose = (np.array(ub_pw) + np.array(lb_pw)) / 2.
+
+            upper_bounds.extend(ub_hor)
+            lower_bounds.extend(lb_hor)
+
+        self.set_path_constraints(
+            upper_bounds, lower_bounds, self.n_waypoints - 1, N)
+
     def update_path_constraints(self, wp_id, pose, N, model_length, model_width, safety_margin):
         """
         Compute upper and lower bounds of the drivable area orthogonal to

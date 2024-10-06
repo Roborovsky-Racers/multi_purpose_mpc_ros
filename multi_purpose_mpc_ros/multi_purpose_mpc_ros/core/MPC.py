@@ -14,7 +14,7 @@ PREDICTION = '#BA4A00'
 
 class MPC:
     def __init__(self, model, N, Q, R, QN, StateConstraints, InputConstraints,
-                 ay_max, use_path_constraints_topic):
+                 ay_max, use_obstacle_avoidance, use_path_constraints_topic):
         """
         Constructor for the Model Predictive Controller.
         :param model: bicycle model object to be controlled
@@ -32,6 +32,7 @@ class MPC:
         self.Q = Q  # weight matrix state vector
         self.R = R  # weight matrix input vector
         self.QN = QN  # weight matrix terminal
+        self.use_obstacle_avoidance = use_obstacle_avoidance
         self.use_path_constraints_topic = use_path_constraints_topic
 
         # Model
@@ -59,6 +60,14 @@ class MPC:
 
         # Initialize Optimization Problem
         self.optimizer = osqp.OSQP()
+
+        # Initialize dynamic constraints once if obstacle_avoidance is disabled
+        if not self.use_obstacle_avoidance:
+            self.model.reference_path.update_simple_path_constraints(
+                N, 
+                self.model.length,
+                self.model.width,
+                self.model.safety_margin)
 
     def _init_problem(self, N):
         """
@@ -118,7 +127,7 @@ class MPC:
             umax_dyn[self.nu*n] = min(vmax_dyn, umax_dyn[self.nu*n])
 
         # Update path constraints
-        if not self.use_path_constraints_topic:
+        if self.use_obstacle_avoidance and not self.use_path_constraints_topic:
             ub, lb, _ = self.model.reference_path.update_path_constraints(
                 self.model.wp_id + 1,
                 [self.model.temporal_state.x, self.model.temporal_state.y, self.model.temporal_state.psi],

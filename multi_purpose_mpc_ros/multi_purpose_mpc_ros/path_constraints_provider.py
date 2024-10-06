@@ -56,6 +56,12 @@ class PathConstraintsProvider(Node):
     def __init__(self, config_path: str) -> None:
         super().__init__("path_constraints_proveder") # type: ignore
 
+        # declare parameters
+        self.declare_parameter("use_boost_acceleration", False)
+
+        # get parameters
+        self.USE_BUG_ACC = self.get_parameter("use_boost_acceleration").get_parameter_value().bool_value
+
         self._cfg = self._load_config(config_path)
         self._odom: Optional[Odometry] = None
         self._enable_control = None
@@ -191,6 +197,7 @@ class PathConstraintsProvider(Node):
                 state_constraints,
                 input_constraints,
                 mpc_cfg.ay_max,
+                True,
                 True)
             return mpc_cfg, mpc
 

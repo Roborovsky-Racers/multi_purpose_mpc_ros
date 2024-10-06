@@ -25,10 +25,10 @@ reference_path:
   smoothing_distance: 3
   max_width: 6.0
   circular: true
-  # use_path_constraints_topic: false
-  # use_border_cells_topic: false
-  use_path_constraints_topic: true
-  use_border_cells_topic: true
+  use_path_constraints_topic: false
+  use_border_cells_topic: false
+  # use_path_constraints_topic: true
+  # use_border_cells_topic: true
 
 bicycle_model:
   length: 1.087

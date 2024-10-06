@@ -37,6 +37,7 @@ from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec, l
 from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
 from multi_purpose_mpc_ros.simulation_logger import SimulationLogger
 from multi_purpose_mpc_ros.obstacle_manager import ObstacleManager
+from multi_purpose_mpc_ros.exexution_stats import ExecutionStats
 from multi_purpose_mpc_ros_msgs.msg import AckermannControlBoostCommand, PathConstraints, BorderCells
 
 def array_to_ackermann_control_command(stamp, u: np.ndarray, acc: float) -> AckermannControlCommand:
@@ -95,12 +96,22 @@ class MPCController(Node):
 
     PKG_PATH: str = get_package_share_directory('multi_purpose_mpc_ros') + "/"
     MAX_LAPS = 6
-    USE_BUG_ACC = False
     BUG_VEL = 40.0 # km/h
     BUG_ACC = 400.0
 
     def __init__(self, config_path: str) -> None:
         super().__init__("mpc_controller") # type: ignore
+
+        # declare parameters
+        self.declare_parameter("use_boost_acceleration", False)
+        self.declare_parameter("use_obstacle_avoidance", False)
+        self.declare_parameter("use_stats", False)
+
+        # get parameters
+        self.use_sim_time = self.get_parameter("use_sim_time").get_parameter_value().bool_value
+        self.USE_BUG_ACC = self.get_parameter("use_boost_acceleration").get_parameter_value().bool_value
+        self.USE_OBSTACLE_AVOIDANCE = self.get_parameter("use_obstacle_avoidance").get_parameter_value().bool_value
+        self.use_stats = self.get_parameter("use_stats").get_parameter_value().bool_value
 
         self._cfg = self._load_config(config_path)
         self._odom: Optional[Odometry] = None
@@ -108,9 +119,18 @@ class MPCController(Node):
         self._initialize()
         self._setup_pub_sub()
 
-        # set use_sim_time parameter
-        param = Parameter("use_sim_time", Parameter.Type.BOOL, True)
-        self.set_parameters([param])
+        if self.use_sim_time:
+            self.get_logger().warn("------------------------------------")
+            self.get_logger().warn("use_time is enabled!")
+            self.get_logger().warn("------------------------------------")
+        if self.USE_BUG_ACC:
+            self.get_logger().warn("------------------------------------")
+            self.get_logger().warn("USE_BUG_ACC is enabled!")
+            self.get_logger().warn("------------------------------------")
+        if self.USE_OBSTACLE_AVOIDANCE:
+            self.get_logger().warn("------------------------------------")
+            self.get_logger().warn("USE_OBSTACLE_AVOIDANCE is enabled!")
+            self.get_logger().warn("------------------------------------")
 
     def destroy(self) -> None:
         self._timer.destroy() # type: ignore
@@ -118,7 +138,9 @@ class MPCController(Node):
         self._mpc_pred_pub.shutdown() # type: ignore
         self._ref_path_pub.shutdown() # type: ignore
         self._odom_sub.shutdown() # type: ignore
-        self._obstacles_sub.shutdown() # type: ignore
+        if self.USE_OBSTACLE_AVOIDANCE:
+            self._obstacles_sub.shutdown() # type: ignore
+
         self._group.destroy() # type: ignore
         super().destroy_node()
 
@@ -243,6 +265,7 @@ class MPCController(Node):
                 state_constraints,
                 input_constraints,
                 mpc_cfg.ay_max,
+                self.USE_OBSTACLE_AVOIDANCE,
                 self._cfg.reference_path.use_path_constraints_topic)
             return mpc_cfg, mpc
 
@@ -254,7 +277,6 @@ class MPCController(Node):
 
         self._map = create_map()
         self._reference_path = create_ref_path(self._map)
-        self._obstacles = create_obstacles()
         self._car = create_car(self._reference_path)
         self._mpc_cfg, self._mpc = create_mpc(self._car)
         compute_speed_profile(self._car, self._mpc_cfg)
@@ -263,9 +285,11 @@ class MPCController(Node):
         self._path_constraints = None
 
         # Obstacles
-        self._use_obstacles_topic = self._obstacles == []
-        self._obstacles_updated = False
-        self._last_obstacles_msgs_raw = None
+        if self.USE_OBSTACLE_AVOIDANCE:
+            self._obstacles = create_obstacles()
+            self._use_obstacles_topic = self._obstacles == []
+            self._obstacles_updated = False
+            self._last_obstacles_msgs_raw = None
 
         # Laps
         self._current_laps = None
@@ -276,10 +300,18 @@ class MPCController(Node):
         self._last_condition = None
         self._last_colliding_time = None
 
+        # stats
+        self._stats = ExecutionStats(window_size=50, record_count_threshold=100)
+
     def _setup_pub_sub(self) -> None:
         # Publishers
-        self._command_pub = self.create_publisher(
+        if self.USE_BUG_ACC:
+          self._command_pub = self.create_publisher(
             AckermannControlBoostCommand, "/boost_commander/command", 1)
+        else:
+          self._command_pub = self.create_publisher(
+            AckermannControlCommand, "/control/command/control_cmd", 1)
+          print("use normal ackermann control command")
 
         # NOTE:評価環境での可視化のためにダミーのトピック名を使用
         # self._mpc_pred_pub = self.create_publisher(
@@ -297,9 +329,6 @@ class MPCController(Node):
         # Subscribers
         self._odom_sub = self.create_subscription(
             Odometry, "/localization/kinematic_state", self._odom_callback, 1)
-        self._obstacles_sub = self.create_subscription(
-            Float64MultiArray, "/aichallenge/objects", self._obstacles_callback, 1)
-            # Float64MultiArray, "/aichallenge/objects2", self._obstacles_callback, 1)
         self._control_mode_request_sub = self.create_subscription(
             Bool, "control/control_mode_request_topic", self._control_mode_request_callback, 1)
         self._trajectory_sub = self.create_subscription(
@@ -309,13 +338,29 @@ class MPCController(Node):
         self._condition_sub = self.create_subscription(
             Int32, "/aichallenge/pitstop/condition", self._condition_callback, 1)
 
-        if self._cfg.reference_path.use_path_constraints_topic: # type: ignore
-            self._path_constraints_sub = self.create_subscription(
-                PathConstraints, "/path_constraints_provider/path_constraints", self._path_constraints_callback, 1)
+        if self.USE_OBSTACLE_AVOIDANCE:
+            self._obstacles_sub = self.create_subscription(
+                Float64MultiArray, "/aichallenge/objects", self._obstacles_callback, 1)
+                # Float64MultiArray, "/aichallenge/objects2", self._obstacles_callback, 1)
 
-        if self._cfg.reference_path.use_border_cells_topic: # type: ignore
-            self._border_cells_sub = self.create_subscription(
-                BorderCells, "/path_constraints_provider/border_cells", self._border_cells_callback, 1)
+            if self._cfg.reference_path.use_path_constraints_topic: # type: ignore
+                self._path_constraints_sub = self.create_subscription(
+                    PathConstraints, "/path_constraints_provider/path_constraints", self._path_constraints_callback, 1)
+
+            if self._cfg.reference_path.use_border_cells_topic: # type: ignore
+                self._border_cells_sub = self.create_subscription(
+                    BorderCells, "/path_constraints_provider/border_cells", self._border_cells_callback, 1)
+
+    def _create_ackerman_control_command(self, stamp, u, acc, bug_acc_enabled):
+        ackerman_cmd = array_to_ackermann_control_command(stamp.to_msg(), u, acc)
+
+        if not self.USE_BUG_ACC:
+            return ackerman_cmd
+
+        ackerman_boost_cmd = AckermannControlBoostCommand()
+        ackerman_boost_cmd.command = ackerman_cmd
+        ackerman_boost_cmd.boost_mode = bug_acc_enabled
+        return ackerman_boost_cmd
 
     def _odom_callback(self, msg: Odometry) -> None:
         self._odom = msg
@@ -377,12 +422,19 @@ class MPCController(Node):
         self._last_condition = msg.data
 
     def _wait_until_clock_received(self) -> None:
-        rate = self.create_rate(10)
-        rate.sleep()
+        if self.use_sim_time:
+            self.get_logger().info(f"wait until clock received...")
+            rate = self.create_rate(10)
+            rate.sleep()
+            self.get_logger().info(f">> OK!")
 
     def _wait_until_message_received(self, message_getter, message_name: str, timeout: float, rate_hz: int = 30) -> None:
+
         t_start = self.get_clock().now()
         rate = self.create_rate(rate_hz)
+
+        self.get_logger().info(f"wait until {message_name} received...")
+
         while message_getter() is None:
             now = self.get_clock().now()
             if (now - t_start).nanoseconds > timeout * 1e9:
@@ -390,21 +442,21 @@ class MPCController(Node):
                 raise TimeoutError(f"Timeout while waiting for {message_name} message")
             rate.sleep()
 
+        self.get_logger().info(f">> OK!")
+
+    def _wait_until_aw_sim_status_received(self, timeout: float = 30.) -> None:
+        if self.use_sim_time:
+            self._wait_until_message_received(lambda: self._current_laps, 'AWSIM status', timeout)
+
     def _wait_until_odom_received(self, timeout: float = 30.) -> None:
         self._wait_until_message_received(lambda: self._odom, 'odometry', timeout)
-
-    def _wait_until_control_mode_request_received(self, timeout: float = 240.) -> None:
-        self._wait_until_message_received(lambda: self._enable_control, 'control mode request', timeout)
 
     def _wait_until_trajectory_received(self, timeout: float = 30.) -> None:
         if self._cfg.reference_path.update_by_topic:
             self._wait_until_message_received(lambda: self._trajectory, 'trajectory', timeout)
 
-    def _wait_until_aw_sim_status_received(self, timeout: float = 30.) -> None:
-        self._wait_until_message_received(lambda: self._current_laps, 'AWSIM status', timeout)
-
     def _wait_until_path_constraints_received(self, timeout: float = 30.) -> None:
-        if self._cfg.reference_path.use_path_constraints_topic: # type: ignore
+        if self.USE_OBSTACLE_AVOIDANCE and self._cfg.reference_path.use_path_constraints_topic: # type: ignore
             self._wait_until_message_received(lambda: self._reference_path.path_constraints, 'path constraints', timeout)
 
     def _publish_mpc_pred_marker(self, x_pred, y_pred):
@@ -476,9 +528,8 @@ class MPCController(Node):
         CYAN.b = 209.0 / 255.0
 
         self._wait_until_clock_received()
-        self._wait_until_odom_received()
-        # self._wait_until_control_mode_request_received()
         self._wait_until_aw_sim_status_received()
+        self._wait_until_odom_received()
         self._wait_until_trajectory_received()
         self._wait_until_path_constraints_received()
 
@@ -492,7 +543,9 @@ class MPCController(Node):
             self.get_logger(),
             self._car.temporal_state.x, self._car.temporal_state.y, self._cfg.sim_logger.animation_enabled, SHOW_PLOT_ANIMATION, PLOT_RESULTS, ANIMATION_INTERVAL) # type: ignore
 
+        self.get_logger().info(f"------")
         self.get_logger().info(f"START!")
+        self.get_logger().info(f"------")
 
         loop = 0
         kp = 100.0
@@ -509,14 +562,18 @@ class MPCController(Node):
 
         t_start = self.get_clock().now()
         last_t = t_start
-        cmd = AckermannControlBoostCommand()
+
         while rclpy.ok() and (not sim_logger.stop_requested()) and self._current_laps <= self.MAX_LAPS:
+            # record and print execution stats
+            if self.use_stats:
+                self._stats.record()
+
             # self.get_logger().info("loop")
             control_rate.sleep()
 
             if loop % 100 == 0:
                 # update obstacles
-                if not self._use_obstacles_topic:
+                if self.USE_OBSTACLE_AVOIDANCE and not self._use_obstacles_topic:
                     # self._obstacle_manager.push_next_obstacle()
                     self._obstacles = self._obstacle_manager.current_obstacles
                     self._obstacles_updated = True
@@ -544,7 +601,7 @@ class MPCController(Node):
             dt = (now - last_t).nanoseconds / 1e9
             last_t = now
 
-            if self._obstacles_updated:
+            if self.USE_OBSTACLE_AVOIDANCE and self._obstacles_updated:
                 self._obstacles_updated = False
                 # self.get_logger().info("Obstacles updated")
                 self._map.reset_map()
@@ -564,8 +621,9 @@ class MPCController(Node):
             # print(f"car x: {self._car.temporal_state.x}, y: {self._car.temporal_state.y}, psi: {self._car.temporal_state.psi}")
             # print(f"mpc x: {self._mpc.model.temporal_state.x}, y: {self._mpc.model.temporal_state.y}, psi: {self._mpc.model.temporal_state.psi}")
 
-            u, max_delta = self._mpc.get_control()
-            # self.get_logger().info(f"u: {u}")
+            with self._stats.time_block("control"):
+                u, max_delta = self._mpc.get_control()
+                # self.get_logger().info(f"u: {u}")
 
             if len(u) == 0:
                 self.get_logger().error("No control signal", throttle_duration_sec=1)
@@ -602,8 +660,9 @@ class MPCController(Node):
 
 
             self._car.drive(u)
-            cmd.command = array_to_ackermann_control_command(now.to_msg(), u, acc)
-            cmd.boost_mode = self.USE_BUG_ACC and bug_acc_enabled
+
+            # Publish control command
+            cmd = self._create_ackerman_control_command(now, u, acc, bug_acc_enabled)
             self._command_pub.publish(cmd)
 
             # Log states
