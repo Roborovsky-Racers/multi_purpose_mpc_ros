@@ -69,6 +69,10 @@ def launch_setup(context, *args, **kwargs):
             "--log-level",
             "info",
         ],
+        parameters=[
+            {"use_boost_acceleration": use_boost_acceleration},
+            {"use_obstacle_avoidance": use_obstacle_avoidance},
+        ],
         condition=IfCondition(use_obstacle_avoidance),
     )
 
