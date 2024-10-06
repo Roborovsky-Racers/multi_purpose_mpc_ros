@@ -105,11 +105,13 @@ class MPCController(Node):
         # declare parameters
         self.declare_parameter("use_boost_acceleration", False)
         self.declare_parameter("use_obstacle_avoidance", False)
+        self.declare_parameter("use_stats", False)
 
         # get parameters
         self.use_sim_time = self.get_parameter("use_sim_time").get_parameter_value().bool_value
         self.USE_BUG_ACC = self.get_parameter("use_boost_acceleration").get_parameter_value().bool_value
         self.USE_OBSTACLE_AVOIDANCE = self.get_parameter("use_obstacle_avoidance").get_parameter_value().bool_value
+        self.use_stats = self.get_parameter("use_stats").get_parameter_value().bool_value
 
         self._cfg = self._load_config(config_path)
         self._odom: Optional[Odometry] = None
@@ -563,7 +565,8 @@ class MPCController(Node):
 
         while rclpy.ok() and (not sim_logger.stop_requested()) and self._current_laps <= self.MAX_LAPS:
             # record and print execution stats
-            # self._stats.record()
+            if self.use_stats:
+                self._stats.record()
 
             # self.get_logger().info("loop")
             control_rate.sleep()

@@ -16,6 +16,7 @@ def launch_setup(context, *args, **kwargs):
     use_sim_time = LaunchConfiguration("use_sim_time")
     use_obstacle_avoidance = LaunchConfiguration("use_obstacle_avoidance")
     use_boost_acceleration = LaunchConfiguration("use_boost_acceleration")
+    use_stats = LaunchConfiguration("use_stats")
 
     config_path = (
         Path(get_package_share_directory("multi_purpose_mpc_ros"))
@@ -39,6 +40,7 @@ def launch_setup(context, *args, **kwargs):
         parameters=[
             {"use_boost_acceleration": use_boost_acceleration},
             {"use_obstacle_avoidance": use_obstacle_avoidance},
+            {"use_stats": use_stats},
         ],
     )
 
@@ -94,6 +96,11 @@ def generate_launch_description():
             "use_obstacle_avoidance",
             "false",
             "Use the functionality of obstacle avoidance",
+        ),
+        (
+            "use_stats",
+            "false",
+            "Use the execution statistics",
         ),
     ]
 
