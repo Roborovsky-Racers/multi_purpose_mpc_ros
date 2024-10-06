@@ -30,6 +30,10 @@ def launch_setup(context, *args, **kwargs):
             "--log-level",
             "info",
         ],
+        parameters=[
+            {"use_boost_acceleration": False},
+            {"use_obstacle_avoidance": True},
+        ],
     )
 
     return [
