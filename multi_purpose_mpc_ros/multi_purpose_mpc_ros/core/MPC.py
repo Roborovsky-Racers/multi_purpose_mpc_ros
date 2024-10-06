@@ -61,6 +61,14 @@ class MPC:
         # Initialize Optimization Problem
         self.optimizer = osqp.OSQP()
 
+        # Initialize dynamic constraints once if obstacle_avoidance is disabled
+        if not self.use_obstacle_avoidance:
+            self.model.reference_path.update_simple_path_constraints(
+                N, 
+                self.model.length,
+                self.model.width,
+                self.model.safety_margin)
+
     def _init_problem(self, N):
         """
         Initialize optimization problem for current time step.
@@ -119,16 +127,7 @@ class MPC:
             umax_dyn[self.nu*n] = min(vmax_dyn, umax_dyn[self.nu*n])
 
         # Update path constraints
-        if not self.use_obstacle_avoidance:
-            self.model.reference_path.update_simple_path_constraints(
-                N, 
-                self.model.length,
-                self.model.width,
-                self.model.safety_margin)
-            ub = self.model.reference_path.path_constraints[0][self.model.wp_id]
-            lb = self.model.reference_path.path_constraints[1][self.model.wp_id]
-            self.model.reference_path.border_cells.current_wp_id = self.model.wp_id
-        elif not self.use_path_constraints_topic:
+        if self.use_obstacle_avoidance and not self.use_path_constraints_topic:
             ub, lb, _ = self.model.reference_path.update_path_constraints(
                 self.model.wp_id + 1,
                 [self.model.temporal_state.x, self.model.temporal_state.y, self.model.temporal_state.psi],

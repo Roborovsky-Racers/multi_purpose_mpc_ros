@@ -705,11 +705,7 @@ class ReferencePath:
 
         return free_segments
 
-    SIMPLE_PATH_CONSTRAINED_CREATED = False
     def update_simple_path_constraints(self, N, model_length, model_width, safety_margin):
-        if self.SIMPLE_PATH_CONSTRAINED_CREATED:
-            return
-
         upper_bounds = []
         lower_bounds = []
         pose = None
@@ -727,8 +723,6 @@ class ReferencePath:
 
         self.set_path_constraints(
             upper_bounds, lower_bounds, self.n_waypoints - 1, N)
-
-        self.SIMPLE_PATH_CONSTRAINED_CREATED = True
 
     def update_path_constraints(self, wp_id, pose, N, model_length, model_width, safety_margin):
         """
