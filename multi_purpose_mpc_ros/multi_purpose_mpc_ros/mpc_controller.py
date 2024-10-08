@@ -64,9 +64,8 @@ def array_to_ackermann_control_command(stamp, u: np.ndarray, acc: float) -> Acke
     msg.lateral.steering_tire_angle = u[1]
     msg.lateral.steering_tire_rotation_rate = 2.0
     msg.longitudinal.stamp = stamp
-    msg.longitudinal.speed = 0.0  #u[0]
+    msg.longitudinal.speed = u[0]
     msg.longitudinal.acceleration = acc
-    # msg.longitudinal.acceleration = -acc  # hack!!!!
     return msg
 
 def yaw_from_quaternion(q: Quaternion):
