@@ -65,8 +65,6 @@ class MPC:
         if not self.use_obstacle_avoidance:
             self.model.reference_path.update_simple_path_constraints(
                 N, 
-                self.model.length,
-                self.model.width,
                 self.model.safety_margin)
 
     def _init_problem(self, N, safety_margin, force_update_dynamic_constraints=False):
@@ -127,7 +125,14 @@ class MPC:
             umax_dyn[self.nu*n] = min(vmax_dyn, umax_dyn[self.nu*n])
 
         # Update path constraints
-        if force_update_dynamic_constraints or (self.use_obstacle_avoidance and not self.use_path_constraints_topic):
+        if force_update_dynamic_constraints:
+            ub, lb = self.model.reference_path.update_simple_path_constraints_horizon(
+                self.model.wp_id + 1,
+                N,
+                safety_margin)
+            self.model.reference_path.border_cells.current_wp_id = self.model.wp_id
+
+        elif (self.use_obstacle_avoidance and not self.use_path_constraints_topic):
             ub, lb, _ = self.model.reference_path.update_path_constraints(
                 self.model.wp_id + 1,
                 [self.model.temporal_state.x, self.model.temporal_state.y, self.model.temporal_state.psi],
@@ -228,6 +233,12 @@ class MPC:
                             break
                         else:
                             print(f"Relaxed safety margin by {relaxed_safety_margin} ({5-i}/5) did not solve the problem")
+
+                # # reset path constraints to original safety margin
+                # _, _, _ = self.model.reference_path.update_simple_path_constraints_horizon(
+                #     self.model.wp_id + 1,
+                #     N,
+                #     self.model.safety_margin)
 
             control_signals[1::2] = np.arctan(control_signals[1::2] *
                                               self.model.length)

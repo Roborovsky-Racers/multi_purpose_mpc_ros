@@ -143,7 +143,7 @@ class MPCController(Node):
 
         if self.use_sim_time:
             self.get_logger().warn("------------------------------------")
-            self.get_logger().warn("use_time is enabled!")
+            self.get_logger().warn("use_sim_time is enabled!")
             self.get_logger().warn("------------------------------------")
         if self.USE_BUG_ACC:
             self.get_logger().warn("------------------------------------")
