@@ -705,24 +705,91 @@ class ReferencePath:
 
         return free_segments
 
-    def update_simple_path_constraints(self, N, model_length, model_width, safety_margin):
+    def update_simple_path_constraints(self, N, safety_margin):
         upper_bounds = []
         lower_bounds = []
-        pose = None
+        dynamic_upper_bounds = []
+        dynamic_lower_bounds = []
 
         for wp_id in range(self.n_waypoints-1):
-            ub_hor, lb_hor, border_cells_hor_sm = self.update_path_constraints(
-                wp_id + 1, pose, N,
-                model_length, model_width, safety_margin
-            )
-            ub_pw, lb_pw = np.array(border_cells_hor_sm[1])
-            pose = (np.array(ub_pw) + np.array(lb_pw)) / 2.
+            for n in range(N):
+                wp = self.get_waypoint(wp_id+n)
 
-            upper_bounds.extend(ub_hor)
-            lower_bounds.extend(lb_hor)
+                # Subtract safety margin
+                ub_sm = wp.ub - safety_margin
+                lb_sm = wp.lb + safety_margin
+
+                # Check feasibility of the path after subtracting safety margin
+                if ub_sm < lb_sm:
+                    ub_sm = 0.0
+                    lb_sm = 0.0
+
+                # wp.ub_sm = ub_sm
+                # wp.lb_sm = lb_sm
+
+                # Compute absolute angle of bound cell
+                angle_ub = np.mod(math.pi / 2 + wp.psi + math.pi,
+                                      2 * math.pi) - math.pi
+                angle_lb = np.mod(-math.pi / 2 + wp.psi + math.pi,
+                                      2 * math.pi) - math.pi
+                # Compute cell on bound for computed distance ub_sm and lb_sm
+                ub_sm_ls = wp.x + ub_sm * np.cos(angle_ub), wp.y + ub_sm * np.sin(
+                        angle_ub)
+                lb_sm_ls = wp.x - lb_sm * np.cos(angle_lb), wp.y - lb_sm * np.sin(
+                        angle_lb)
+
+                upper_bounds.append(ub_sm)
+                lower_bounds.append(lb_sm)
+                dynamic_upper_bounds.append(ub_sm_ls)
+                dynamic_lower_bounds.append(lb_sm_ls)
 
         self.set_path_constraints(
             upper_bounds, lower_bounds, self.n_waypoints - 1, N)
+        self.set_border_cells(
+            dynamic_upper_bounds, dynamic_lower_bounds, self.n_waypoints - 1, N)
+
+    def update_simple_path_constraints_horizon(self, wp_id, N, safety_margin):
+        # container for constraints and border cells
+        upper_bounds = []
+        lower_bounds = []
+        dynamic_upper_bounds = []
+        dynamic_lower_bounds = []
+
+        for n in range(N):
+            # print(f"wp_id: {wp_id}, N: {N}, n: {n}")
+            wp = self.get_waypoint(wp_id+n)
+
+            # Subtract safety margin
+            ub_sm = wp.ub - safety_margin
+            lb_sm = wp.lb + safety_margin
+
+            # Check feasibility of the path after subtracting safety margin
+            if ub_sm < lb_sm:
+                ub_sm = 0.0
+                lb_sm = 0.0
+
+            # Compute absolute angle of bound cell
+            angle_ub = np.mod(math.pi / 2 + wp.psi + math.pi,
+                                  2 * math.pi) - math.pi
+            angle_lb = np.mod(-math.pi / 2 + wp.psi + math.pi,
+                                  2 * math.pi) - math.pi
+            # Compute cell on bound for computed distance ub_sm and lb_sm
+            ub_sm_ls = wp.x + ub_sm * np.cos(angle_ub), wp.y + ub_sm * np.sin(
+                    angle_ub)
+            lb_sm_ls = wp.x - lb_sm * np.cos(angle_lb), wp.y - lb_sm * np.sin(
+                    angle_lb)
+
+            # Append results
+            upper_bounds.append(ub_sm)
+            lower_bounds.append(lb_sm)
+            dynamic_upper_bounds.append(ub_sm_ls)
+            dynamic_lower_bounds.append(lb_sm_ls)
+
+        # Set dynamic bounds for show plot
+        self.border_cells.dynamic_upper_bounds[wp_id] = np.array(dynamic_upper_bounds).reshape(N, 2)
+        self.border_cells.dynamic_lower_bounds[wp_id] = np.array(dynamic_lower_bounds).reshape(N, 2)
+
+        return np.array(upper_bounds), np.array(lower_bounds)
 
     def update_path_constraints(self, wp_id, pose, N, model_length, model_width, safety_margin):
         """

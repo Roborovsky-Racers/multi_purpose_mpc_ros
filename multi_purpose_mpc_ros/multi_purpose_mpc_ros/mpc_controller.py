@@ -111,7 +111,8 @@ class MPCConfig:
 class MPCController(Node):
 
     PKG_PATH: str = get_package_share_directory('multi_purpose_mpc_ros') + "/"
-    MAX_LAPS = 6
+    # MAX_LAPS = 6
+    MAX_LAPS = 10000
     BUG_VEL = 40.0 # km/h
     BUG_ACC = 400.0
 
@@ -143,7 +144,7 @@ class MPCController(Node):
 
         if self.use_sim_time:
             self.get_logger().warn("------------------------------------")
-            self.get_logger().warn("use_time is enabled!")
+            self.get_logger().warn("use_sim_time is enabled!")
             self.get_logger().warn("------------------------------------")
         if self.USE_BUG_ACC:
             self.get_logger().warn("------------------------------------")
