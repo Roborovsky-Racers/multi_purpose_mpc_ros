@@ -260,6 +260,12 @@ class MPCController(Node):
 
         def create_mpc(car: BicycleModel) -> Tuple[MPCConfig, MPC]:
             cfg_mpc = self._cfg.mpc # type: ignore
+
+            # 実機では steering_tire_angle_gain_var の分だけ制御可能なステアリング角が低減するため、制御所の最大ステアリング角もそれに合わせて変更する
+            # (実機とsimでもできるだけ同じような挙動とするために制御範囲を同じにしておく)
+            compensated_delta_max_deg = cfg_mpc.delta_max_deg / cfg_mpc.steering_tire_angle_gain_var
+            # self.get_logger().warn(f"compensated_delta_max: {compensated_delta_max_deg}, delta_max: {cfg_mpc.delta_max_deg}")
+
             mpc_cfg = MPCConfig(
                 cfg_mpc.N,
                 sparse.diags(cfg_mpc.Q),
@@ -269,7 +275,7 @@ class MPCController(Node):
                 cfg_mpc.a_min,
                 cfg_mpc.a_max,
                 cfg_mpc.ay_max,
-                np.deg2rad(cfg_mpc.delta_max_deg),
+                np.deg2rad(compensated_delta_max_deg),
                 cfg_mpc.control_rate)
 
             state_constraints = {
@@ -376,7 +382,14 @@ class MPCController(Node):
                     BorderCells, "/path_constraints_provider/border_cells", self._border_cells_callback, 1)
 
     def _create_ackerman_control_command(self, stamp, u, acc, bug_acc_enabled):
-        ackerman_cmd = array_to_ackermann_control_command(stamp.to_msg(), u, acc)
+        v_cmd = u[0]
+        steer_cmd = u[1]
+
+        # compensate steering angle for the real vehicle
+        if not self.use_sim_time:
+            steer_cmd = steer_cmd * self._cfg.mpc.steering_tire_angle_gain_var
+
+        ackerman_cmd = array_to_ackermann_control_command(stamp.to_msg(), [v_cmd, steer_cmd], acc)
 
         if not self.USE_BUG_ACC:
             return ackerman_cmd
@@ -699,7 +712,7 @@ class MPCController(Node):
             self._enable_control = False
             self._control()
 
-        # Publish zero command
+        # Publish zero command to stop the car completely
         zero_cmd = self._create_ackerman_control_command(self.get_clock().now(), [0.0, 0.0], 0.0, False)
         self._command_pub.publish(zero_cmd)
 
