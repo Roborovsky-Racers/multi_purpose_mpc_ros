@@ -64,7 +64,7 @@ class MPC:
         # Initialize dynamic constraints once if obstacle_avoidance is disabled
         if not self.use_obstacle_avoidance:
             self.model.reference_path.update_simple_path_constraints(
-                N, 
+                N,
                 self.model.safety_margin)
 
     def _init_problem(self, N, safety_margin, force_update_dynamic_constraints=False):
@@ -99,7 +99,7 @@ class MPC:
         # Get curvature predictions from previous control signals
         kappa_pred = np.tan(np.array(self.current_control[3:] +
                                      self.current_control[-1:])) / self.model.length
-
+        self.model.wp_id += 3
         # Iterate over horizon
         for n in range(N):
 
@@ -141,9 +141,12 @@ class MPC:
                 self.model.width,
                 safety_margin)
         else:
-            ub = self.model.reference_path.path_constraints[0][self.model.wp_id]
-            lb = self.model.reference_path.path_constraints[1][self.model.wp_id]
-            self.model.reference_path.border_cells.current_wp_id = self.model.wp_id
+            wp_id = self.model.wp_id
+            if len(self.model.reference_path.path_constraints[0]) <= wp_id:
+                wp_id = len(self.model.reference_path.path_constraints[0]) - 1
+            ub = self.model.reference_path.path_constraints[0][wp_id]
+            lb = self.model.reference_path.path_constraints[1][wp_id]
+            self.model.reference_path.border_cells.current_wp_id = wp_id
 
         # Update dynamic state constraints
         xmin_dyn[0] = xmax_dyn[0] = self.model.spatial_state.e_y
