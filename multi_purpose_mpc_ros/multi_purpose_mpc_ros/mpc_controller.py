@@ -535,6 +535,19 @@ class MPCController(Node):
         m_base.color.r = 0.0
         m_base.color.g = 0.0
         m_base.color.b = 1.0
+        spheres = Marker()
+        spheres.header.frame_id = "map"
+        spheres.ns = "ref_path_point"
+        spheres.type = Marker.SPHERE_LIST
+        spheres.action = Marker.ADD
+        radius = 0.2
+        spheres.scale.x = radius
+        spheres.scale.y = radius
+        spheres.scale.z = radius
+        spheres.color.a = 0.7
+        spheres.color.r = 1.0
+        spheres.color.g = 1.0
+        spheres.color.b = 0.0
         for i in range(len(ref_path.waypoints) - 1):
             m = copy.deepcopy(m_base)
             m.id = i
@@ -547,6 +560,14 @@ class MPCController(Node):
             m.points.append(start) # type: ignore
             m.points.append(end) # type: ignore
             ref_path_marker_array.markers.append(m) # type: ignore
+
+            p = Point()
+            p.x = ref_path.waypoints[i].x
+            p.y = ref_path.waypoints[i].y
+            p.z = 0.
+            spheres.points.append(p) #type: ignore
+        ref_path_marker_array.markers.append(spheres) # type: ignore
+
         self._ref_path_pub.publish(ref_path_marker_array)
 
     def _control(self):
