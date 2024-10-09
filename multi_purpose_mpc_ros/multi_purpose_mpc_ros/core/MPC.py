@@ -55,6 +55,8 @@ class MPC:
         # Counter for old control signals in case of infeasible problem
         self.infeasibility_counter = 0
 
+        self.last_solved_wp_id = 0
+
         # Current control signals
         self.current_control = np.zeros((self.nu*self.N))
 
@@ -229,10 +231,12 @@ class MPC:
 
                     if self.infeasibility_counter == 0:
                         if np.all(use_control_signals):
-                            print(f"Relaxed safety margin by {relaxed_safety_margin} ({5-i}/5) to solve the problem")
+                            if self.last_solved_wp_id != self.model.wp_id:
+                                print(f"Relaxed safety margin by {relaxed_safety_margin} ({5-i}/5) to solve the problem")
                             break
                         else:
-                            print(f"Relaxed safety margin by {relaxed_safety_margin} ({5-i}/5) did not solve the problem")
+                            if self.last_solved_wp_id != self.model.wp_id:
+                                print(f"Relaxed safety margin by {relaxed_safety_margin} ({5-i}/5) did not solve the problem")
 
                 # # reset path constraints to original safety margin
                 # _, _, _ = self.model.reference_path.update_simple_path_constraints_horizon(
@@ -264,6 +268,7 @@ class MPC:
             if self.infeasibility_counter > (N - 1):
                 print(f'Problem solved after {self.infeasibility_counter} infeasible iterations')
             self.infeasibility_counter = 0
+            self.last_solved_wp_id = self.model.wp_id
 
         except Exception as e:
             # print('Infeasible problem. Previously predicted'
@@ -279,7 +284,7 @@ class MPC:
             # increase infeasibility counter
             self.infeasibility_counter += 1
 
-        if self.infeasibility_counter > (N - 1) and self.infeasibility_counter % N == 0:
+        if self.infeasibility_counter > (N - 1) and self.infeasibility_counter % 1000 == 0:
             print('No control signal computed!')
 
         return u, max_delta
