@@ -159,7 +159,9 @@ class MPCController(Node):
         self._timer.destroy() # type: ignore
         self._command_pub.shutdown() # type: ignore
         self._mpc_pred_pub.shutdown() # type: ignore
+        self._mpc_pred_pub_dummy.shutdown() # type: ignore
         self._ref_path_pub.shutdown() # type: ignore
+        self._ref_path_pub_dummy.shutdown() # type: ignore
         self._odom_sub.shutdown() # type: ignore
         if self.USE_OBSTACLE_AVOIDANCE:
             self._obstacles_sub.shutdown() # type: ignore
@@ -343,16 +345,16 @@ class MPCController(Node):
           print("use normal ackermann control command")
 
         # NOTE:評価環境での可視化のためにダミーのトピック名を使用
-        # self._mpc_pred_pub = self.create_publisher(
-        #     MarkerArray, "/mpc/prediction", 1)
         self._mpc_pred_pub = self.create_publisher(
+            MarkerArray, "/mpc/prediction", 1)
+        self._mpc_pred_pub_dummy = self.create_publisher(
             MarkerArray, "/planning/scenario_planning/lane_driving/motion_planning/obstacle_stop_planner/virtual_wall", 1)
 
         latching_qos = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
         # NOTE:評価環境での可視化のためにダミーのトピック名を使用
-        # self._ref_path_pub = self.create_publisher(
-        #     MarkerArray, "/mpc/ref_path", latching_qos)
         self._ref_path_pub = self.create_publisher(
+            MarkerArray, "/mpc/ref_path", latching_qos)
+        self._ref_path_pub_dummy = self.create_publisher(
             MarkerArray, "/planning/scenario_planning/lane_driving/behavior_planning/behavior_path_planner/debug/bound", latching_qos)
 
         # Subscribers
@@ -521,6 +523,7 @@ class MPCController(Node):
             m.pose.position.y = y_pred[i]
             pred_marker_array.markers.append(m) # type: ignore
         self._mpc_pred_pub.publish(pred_marker_array)
+        self._mpc_pred_pub_dummy.publish(pred_marker_array)
 
     def _publish_ref_path_marker(self, ref_path: ReferencePath):
         ref_path_marker_array = MarkerArray()
@@ -569,6 +572,7 @@ class MPCController(Node):
         ref_path_marker_array.markers.append(spheres) # type: ignore
 
         self._ref_path_pub.publish(ref_path_marker_array)
+        self._ref_path_pub_dummy.publish(ref_path_marker_array)
 
     def _control(self):
         now = self.get_clock().now()
