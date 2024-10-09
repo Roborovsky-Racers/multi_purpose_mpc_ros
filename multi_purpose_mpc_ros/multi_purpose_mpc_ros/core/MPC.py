@@ -69,6 +69,9 @@ class MPC:
                 N, 
                 self.model.safety_margin)
 
+    def update_vmax(self, v_max):
+        self.input_constraints['umax'][0] = v_max
+
     def _init_problem(self, N, safety_margin, force_update_dynamic_constraints=False):
         """
         Initialize optimization problem for current time step.
@@ -110,7 +113,9 @@ class MPC:
             next_waypoint = self.model.reference_path.get_waypoint(self.model.wp_id + n + 1)
             delta_s = next_waypoint - current_waypoint
             kappa_ref = current_waypoint.kappa
-            v_ref = current_waypoint.v_ref
+
+            # Clip reference velocity to input constraints
+            v_ref = np.clip(current_waypoint.v_ref, self.input_constraints['umin'][0], self.input_constraints['umax'][0])
 
             # Compute LTV matrices
             f, A_lin, B_lin = self.model.linearize(v_ref, kappa_ref, delta_s)

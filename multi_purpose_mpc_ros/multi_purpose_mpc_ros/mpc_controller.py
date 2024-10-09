@@ -636,6 +636,17 @@ class MPCController(Node):
             u, max_delta = self._mpc.get_control()
             # self.get_logger().info(f"u: {u}")
 
+        # 速度制限を動的に変更する例
+        # print(t, self._car.s)
+        # スタート付近が s == 26.70
+        # if t > 20.0:
+        #     self._mpc.update_vmax(kmh_to_m_per_sec(30.0))
+        # elif t > 10.0:
+        #     self._mpc.update_vmax(kmh_to_m_per_sec(20.0))
+        # else:
+        #     self._mpc.update_vmax(kmh_to_m_per_sec(10.0))
+
+
         # override by brake command if control is disabled
         if not self._enable_control:
             last_v_cmd = self._last_u[0]
