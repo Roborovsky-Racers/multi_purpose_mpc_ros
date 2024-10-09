@@ -30,7 +30,10 @@ from autoware_auto_planning_msgs.msg import Trajectory
 from multi_purpose_mpc_ros.core.map import Map, Obstacle
 from multi_purpose_mpc_ros.core.reference_path import ReferencePath
 from multi_purpose_mpc_ros.core.spatial_bicycle_models import BicycleModel
+# from multi_purpose_mpc_ros.core.spatial_bicycle_models_new import BicycleModel
 from multi_purpose_mpc_ros.core.MPC import MPC
+# from multi_purpose_mpc_ros.core.MPC_with_delay import MPCWithDelay
+# from multi_purpose_mpc_ros.core.MPC_new import MPCNew
 from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec, load_ref_path
 
 # Project
@@ -287,6 +290,7 @@ class MPCController(Node):
             input_constraints = {
                 "umin": np.array([0.0, -np.tan(mpc_cfg.delta_max) / car.length]),
                 "umax": np.array([mpc_cfg.v_max, np.tan(mpc_cfg.delta_max) / car.length])}
+
             mpc = MPC(
                 car,
                 mpc_cfg.N,
@@ -298,6 +302,32 @@ class MPCController(Node):
                 mpc_cfg.ay_max,
                 self.USE_OBSTACLE_AVOIDANCE,
                 self._cfg.reference_path.use_path_constraints_topic)
+
+            # mpc = MPCWithDelay(
+            #     car,
+            #     mpc_cfg.N,
+            #     mpc_cfg.Q,
+            #     mpc_cfg.R,
+            #     mpc_cfg.QN,
+            #     state_constraints,
+            #     input_constraints,
+            #     mpc_cfg.ay_max,
+            #     self.USE_OBSTACLE_AVOIDANCE,
+            #     self._cfg.reference_path.use_path_constraints_topic, 5)
+
+            # mpc = MPCNew(
+            #     car,
+            #     mpc_cfg.N,
+            #     mpc_cfg.Q,
+            #     mpc_cfg.R,
+            #     mpc_cfg.QN,
+            #     state_constraints,
+            #     input_constraints,
+            #     mpc_cfg.ay_max,
+            #     self.USE_OBSTACLE_AVOIDANCE,
+            #     self._cfg.reference_path.use_path_constraints_topic,
+            #     D_s=1, D_a=1)
+
             return mpc_cfg, mpc
 
         def compute_speed_profile(car: BicycleModel, mpc_config: MPCConfig) -> None:
