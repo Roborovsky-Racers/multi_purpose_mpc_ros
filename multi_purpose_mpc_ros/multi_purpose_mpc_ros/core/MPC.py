@@ -73,8 +73,14 @@ class MPC:
                 N,
                 self.model.safety_margin)
 
-    def update_vmax(self, v_max):
+    def update_v_max(self, v_max: float):
         self.input_constraints['umax'][0] = v_max
+
+    def update_ay_max(self, ay_max: float):
+        self.ay_max = ay_max
+
+    def update_wp_id_offset(self, wp_id_offset: int):
+        self.wp_id_offset = wp_id_offset
 
     def _init_problem(self, N, safety_margin, force_update_dynamic_constraints=False):
         """

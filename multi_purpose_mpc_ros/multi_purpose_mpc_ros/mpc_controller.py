@@ -22,6 +22,9 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Quaternion, Pose2D, Point
 from std_msgs.msg import ColorRGBA
 
+from rcl_interfaces.msg import SetParametersResult
+from rclpy.parameter import Parameter
+
 # autoware
 from autoware_auto_control_msgs.msg import AckermannControlCommand
 from autoware_auto_planning_msgs.msg import Trajectory
@@ -31,7 +34,7 @@ from multi_purpose_mpc_ros.core.map import Map, Obstacle
 from multi_purpose_mpc_ros.core.reference_path import ReferencePath
 from multi_purpose_mpc_ros.core.spatial_bicycle_models import BicycleModel
 from multi_purpose_mpc_ros.core.MPC import MPC
-from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec, load_ref_path
+from multi_purpose_mpc_ros.core.utils import load_waypoints, m_per_sec_to_kmh, kmh_to_m_per_sec, load_ref_path
 
 # Project
 from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
@@ -106,6 +109,7 @@ class MPCConfig:
     ay_max: float
     delta_max: float
     control_rate: float
+    steering_tire_angle_gain_var: float
     wp_id_offset: int
 
 
@@ -141,6 +145,7 @@ class MPCController(Node):
         self._odom: Optional[Odometry] = None
         self._enable_control = True
         self._initialize()
+        self._setup_parameters_callback()
         self._setup_pub_sub()
 
         if self.use_sim_time:
@@ -207,6 +212,45 @@ class MPCController(Node):
 
         return reference_path
 
+    def _setup_parameters_callback(self) -> None:
+        def declatre_parameters():
+            cfg_mpc = self._cfg.mpc
+            self.declare_parameter("v_max", cfg_mpc.v_max)
+            self.declare_parameter("steering_tire_angle_gain_var", cfg_mpc.steering_tire_angle_gain_var)
+
+            mpc_cfg = self._mpc_cfg
+            self.declare_parameter("ay_max", mpc_cfg.ay_max)
+            self.declare_parameter("wp_id_offset", mpc_cfg.wp_id_offset)
+
+        def param_cb(parameters):
+            mpc_cfg = self._mpc_cfg
+
+            for param in parameters:
+                if param.name == "v_max" and param.type_ == Parameter.Type.DOUBLE:
+                    mpc_cfg.v_max = param.value
+                    self._mpc.update_v_max(kmh_to_m_per_sec(param.value))
+                    self.get_logger().warn(f"v_max was updated to '{param.value}' [km/h]")
+
+                elif param.name == "steering_tire_angle_gain_var" and param.type_ == Parameter.Type.DOUBLE:
+                    mpc_cfg.steering_tire_angle_gain_var = param.value
+                    self.get_logger().warn(f"steering_tire_angle_gain_var was updated to '{param.value}'")
+
+                elif param.name == "ay_max" and param.type_ == Parameter.Type.DOUBLE:
+                    mpc_cfg.ay_max = param.value
+                    self._mpc.update_ay_max(param.value)
+                    self.get_logger().warn(f"ay_max was updated to '{param.value}'")
+
+                elif param.name == "wp_id_offset" and param.type_ == Parameter.Type.INTEGER:
+                    mpc_cfg.wp_id_offset = param.value
+                    self._mpc.update_wp_id_offset(param.value)
+                    self.get_logger().warn(f"wp_id_offset was updated to '{param.value}'")
+
+
+            return SetParametersResult(successful=True)
+
+        declatre_parameters()
+        self.add_on_set_parameters_callback(param_cb)
+
     def _initialize(self) -> None:
         def create_map() -> Map:
             return Map(self.in_pkg_share(self._cfg.map.yaml_path)) # type: ignore
@@ -265,11 +309,6 @@ class MPCController(Node):
         def create_mpc(car: BicycleModel) -> Tuple[MPCConfig, MPC]:
             cfg_mpc = self._cfg.mpc # type: ignore
 
-            # 実機では steering_tire_angle_gain_var の分だけ制御可能なステアリング角が低減するため、制御所の最大ステアリング角もそれに合わせて変更する
-            # (実機とsimでもできるだけ同じような挙動とするために制御範囲を同じにしておく)
-            compensated_delta_max_deg = cfg_mpc.delta_max_deg / cfg_mpc.steering_tire_angle_gain_var
-            # self.get_logger().warn(f"compensated_delta_max: {compensated_delta_max_deg}, delta_max: {cfg_mpc.delta_max_deg}")
-
             mpc_cfg = MPCConfig(
                 cfg_mpc.N,
                 sparse.diags(cfg_mpc.Q),
@@ -279,8 +318,9 @@ class MPCController(Node):
                 cfg_mpc.a_min,
                 cfg_mpc.a_max,
                 cfg_mpc.ay_max,
-                np.deg2rad(compensated_delta_max_deg),
+                np.deg2rad(cfg_mpc.delta_max_deg),
                 cfg_mpc.control_rate,
+                cfg_mpc.steering_tire_angle_gain_var,
                 cfg_mpc.wp_id_offset)
 
             state_constraints = {
@@ -289,6 +329,7 @@ class MPCController(Node):
             input_constraints = {
                 "umin": np.array([0.0, -np.tan(mpc_cfg.delta_max) / car.length]),
                 "umax": np.array([mpc_cfg.v_max, np.tan(mpc_cfg.delta_max) / car.length])}
+
             mpc = MPC(
                 car,
                 mpc_cfg.N,
@@ -301,6 +342,7 @@ class MPCController(Node):
                 mpc_cfg.wp_id_offset,
                 self.USE_OBSTACLE_AVOIDANCE,
                 self._cfg.reference_path.use_path_constraints_topic)
+
             return mpc_cfg, mpc
 
         def compute_speed_profile(car: BicycleModel, mpc_config: MPCConfig) -> None:
@@ -393,7 +435,7 @@ class MPCController(Node):
 
         # compensate steering angle for the real vehicle
         if not self.use_sim_time:
-            steer_cmd = steer_cmd * self._cfg.mpc.steering_tire_angle_gain_var
+            steer_cmd = steer_cmd * self._mpc_cfg.steering_tire_angle_gain_var
 
         ackerman_cmd = array_to_ackermann_control_command(stamp.to_msg(), [v_cmd, steer_cmd], acc)
 
