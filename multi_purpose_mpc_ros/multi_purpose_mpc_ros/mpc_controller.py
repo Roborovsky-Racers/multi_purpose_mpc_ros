@@ -368,7 +368,7 @@ class MPCController(Node):
             self._last_obstacles_msgs_raw = None
 
         # Laps
-        self._current_laps = None
+        self._current_laps = None if self.use_sim_time else 1
         self._last_lap_time = 0.0
         self._lap_times = [None] * (self.MAX_LAPS + 1) # +1 means include lap 0
 
