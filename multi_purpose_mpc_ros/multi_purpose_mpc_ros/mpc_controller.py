@@ -110,6 +110,8 @@ class MPCConfig:
     delta_max: float
     control_rate: float
     steering_tire_angle_gain_var: float
+    accel_low_pass_gain: float
+    steer_low_pass_gain: float
     wp_id_offset: int
 
 
@@ -220,6 +222,8 @@ class MPCController(Node):
 
             mpc_cfg = self._mpc_cfg
             self.declare_parameter("ay_max", mpc_cfg.ay_max)
+            self.declare_parameter("accel_low_pass_gain", mpc_cfg.accel_low_pass_gain)
+            self.declare_parameter("steer_low_pass_gain", mpc_cfg.steer_low_pass_gain)
             self.declare_parameter("wp_id_offset", mpc_cfg.wp_id_offset)
 
         def param_cb(parameters):
@@ -242,6 +246,14 @@ class MPCController(Node):
                     mpc_cfg.ay_max = param.value
                     self._mpc.update_ay_max(param.value)
                     self.get_logger().warn(f"ay_max was updated to '{param.value}'")
+
+                elif param.name == "accel_low_pass_gain" and param.type_ == Parameter.Type.DOUBLE:
+                    mpc_cfg.accel_low_pass_gain = param.value
+                    self.get_logger().warn(f"accel_low_pass_gain was updated to '{param.value}'")
+                
+                elif param.name == "steer_low_pass_gain" and param.type_ == Parameter.Type.DOUBLE:
+                    mpc_cfg.steer_low_pass_gain = param.value
+                    self.get_logger().warn(f"steer_low_pass_gain was updated to '{param.value}'")
 
                 elif param.name == "wp_id_offset" and param.type_ == Parameter.Type.INTEGER:
                     mpc_cfg.wp_id_offset = param.value
@@ -324,6 +336,8 @@ class MPCController(Node):
                 np.deg2rad(cfg_mpc.delta_max_deg),
                 cfg_mpc.control_rate,
                 cfg_mpc.steering_tire_angle_gain_var,
+                cfg_mpc.accel_low_pass_gain,
+                cfg_mpc.steer_low_pass_gain,
                 cfg_mpc.wp_id_offset)
 
             state_constraints = {
@@ -735,6 +749,12 @@ class MPCController(Node):
             # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
             acc = np.clip(acc, self._mpc_cfg.a_min, self._mpc_cfg.a_max)
         # u[0] = np.clip(last_u[0] + acc * dt, 0.0, self._mpc_cfg.v_max)
+
+        # apply low pass filter to control signal
+        acc = self._last_acc + (acc - self._last_acc) * self._mpc_cfg.accel_low_pass_gain
+        u[1] = self._last_u[1] + (u[1] - self._last_u[1]) * self._mpc_cfg.steer_low_pass_gain
+
+        self._last_acc = acc
         self._last_u[0] = u[0]
         self._last_u[1] = u[1]
 
@@ -778,6 +798,7 @@ class MPCController(Node):
             self._car.temporal_state.x, self._car.temporal_state.y, self._cfg.sim_logger.animation_enabled, self.SHOW_PLOT_ANIMATION, self.PLOT_RESULTS, self.ANIMATION_INTERVAL) # type: ignore
 
         self._loop = 0
+        self._last_acc = 0.0
         self._last_u = np.array([0.0, 0.0])
         self._t_start = self.get_clock().now()
         self._last_t = self._t_start
