@@ -14,7 +14,7 @@ PREDICTION = '#BA4A00'
 
 class MPC:
     def __init__(self, model, N, Q, R, QN, StateConstraints, InputConstraints,
-                 ay_max, use_obstacle_avoidance, use_path_constraints_topic):
+                 ay_max, wp_id_offset, use_obstacle_avoidance, use_path_constraints_topic):
         """
         Constructor for the Model Predictive Controller.
         :param model: bicycle model object to be controlled
@@ -25,6 +25,9 @@ class MPC:
         :param StateConstraints: dictionary of state constraints
         :param InputConstraints: dictionary of input constraints
         :param ay_max: maximum allowed lateral acceleration in curves
+        :param wp_id_offset: offset for waypoint id to consider control delay
+        :param use_obstacle_avoidance: flag to enable obstacle avoidance
+        :param use_path_constraints_topic: flag to use path constraints from topic
         """
 
         # Parameters
@@ -32,8 +35,11 @@ class MPC:
         self.Q = Q  # weight matrix state vector
         self.R = R  # weight matrix input vector
         self.QN = QN  # weight matrix terminal
+        self.wp_id_offset = wp_id_offset
         self.use_obstacle_avoidance = use_obstacle_avoidance
         self.use_path_constraints_topic = use_path_constraints_topic
+        print(f"========================")
+        print(f"wpid offset: {wp_id_offset}")
 
         # Model
         self.model = model
@@ -104,7 +110,10 @@ class MPC:
         # Get curvature predictions from previous control signals
         kappa_pred = np.tan(np.array(self.current_control[3:] +
                                      self.current_control[-1:])) / self.model.length
-        self.model.wp_id += 3
+
+        # 実機における制御遅延を考慮して、実際の位置よりオフセットした位置のwaypointにいるものとして制御を行う
+        self.model.wp_id += self.wp_id_offset
+
         # Iterate over horizon
         for n in range(N):
 
