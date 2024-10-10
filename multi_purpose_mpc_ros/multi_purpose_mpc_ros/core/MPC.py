@@ -73,7 +73,7 @@ class MPC:
                 N,
                 self.model.safety_margin)
 
-    def update_vmax(self, v_max: float):
+    def update_v_max(self, v_max: float):
         self.input_constraints['umax'][0] = v_max
 
     def update_ay_max(self, ay_max: float):

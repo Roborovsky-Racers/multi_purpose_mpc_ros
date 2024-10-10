@@ -228,7 +228,7 @@ class MPCController(Node):
             for param in parameters:
                 if param.name == "v_max" and param.type_ == Parameter.Type.DOUBLE:
                     mpc_cfg.v_max = param.value
-                    self._mpc.update_vmax(kmh_to_m_per_sec(param.value))
+                    self._mpc.update_v_max(kmh_to_m_per_sec(param.value))
                     self.get_logger().warn(f"v_max was updated to '{param.value}' [km/h]")
 
                 elif param.name == "steering_tire_angle_gain_var" and param.type_ == Parameter.Type.DOUBLE:
