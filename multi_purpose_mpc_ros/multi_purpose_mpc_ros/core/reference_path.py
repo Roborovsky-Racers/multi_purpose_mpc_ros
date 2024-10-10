@@ -221,6 +221,10 @@ class ReferencePath:
             wp.ub_sm = copy.deepcopy(wp.ub)
             wp.lb_sm = copy.deepcopy(wp.lb)
 
+    def set_v_ref(self, v_ref: List[float]) -> None:
+        for wp, v in zip(self.waypoints, v_ref):
+            wp.v_ref = v
+
     def _construct_path(self, wp_x, wp_y):
         """
         Construct path from given waypoints.
