@@ -106,6 +106,7 @@ class MPCConfig:
     ay_max: float
     delta_max: float
     control_rate: float
+    wp_id_offset: int
 
 
 class MPCController(Node):
@@ -279,7 +280,8 @@ class MPCController(Node):
                 cfg_mpc.a_max,
                 cfg_mpc.ay_max,
                 np.deg2rad(compensated_delta_max_deg),
-                cfg_mpc.control_rate)
+                cfg_mpc.control_rate,
+                cfg_mpc.wp_id_offset)
 
             state_constraints = {
                 "xmin": np.array([-np.inf, -np.inf, -np.inf]),
@@ -296,6 +298,7 @@ class MPCController(Node):
                 state_constraints,
                 input_constraints,
                 mpc_cfg.ay_max,
+                mpc_cfg.wp_id_offset,
                 self.USE_OBSTACLE_AVOIDANCE,
                 self._cfg.reference_path.use_path_constraints_topic)
             return mpc_cfg, mpc

@@ -50,5 +50,6 @@ mpc:
   delta_max_deg: 35.0 # degrees
   control_rate: 40.0 # Hz
   steering_tire_angle_gain_var: 1.639
+  wp_id_offset: 3
 
 
