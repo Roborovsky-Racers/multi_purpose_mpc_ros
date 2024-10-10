@@ -38,8 +38,6 @@ class MPC:
         self.wp_id_offset = wp_id_offset
         self.use_obstacle_avoidance = use_obstacle_avoidance
         self.use_path_constraints_topic = use_path_constraints_topic
-        print(f"========================")
-        print(f"wpid offset: {wp_id_offset}")
 
         # Model
         self.model = model
