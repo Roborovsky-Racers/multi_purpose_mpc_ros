@@ -371,7 +371,7 @@ class MPCController(Node):
             self._last_obstacles_msgs_raw = None
 
         # Laps
-        self._current_laps = None
+        self._current_laps = None if self.use_sim_time else 1
         self._last_lap_time = 0.0
         self._lap_times = [None] * (self.MAX_LAPS + 1) # +1 means include lap 0
 
@@ -412,12 +412,14 @@ class MPCController(Node):
             Bool, "control/control_mode_request_topic", self._control_mode_request_callback, 1)
         self._trajectory_sub = self.create_subscription(
             Trajectory, "planning/scenario_planning/trajectory", self._trajectory_callback, 1)
-        self._awsim_status_sub = self.create_subscription(
-            Float32MultiArray, "/aichallenge/awsim/status", self._awsim_status_callback, 1)
-        self._condition_sub = self.create_subscription(
-            Int32, "/aichallenge/pitstop/condition", self._condition_callback, 1)
         self._stop_request_sub = self.create_subscription(
             Empty, "/control/mpc/stop_request", self._stop_request_callback, 1)
+
+        if self.use_sim_time:
+            self._awsim_status_sub = self.create_subscription(
+                Float32MultiArray, "/aichallenge/awsim/status", self._awsim_status_callback, 1)
+            self._condition_sub = self.create_subscription(
+                Int32, "/aichallenge/pitstop/condition", self._condition_callback, 1)
 
         if self.USE_OBSTACLE_AVOIDANCE:
             self._obstacles_sub = self.create_subscription(
