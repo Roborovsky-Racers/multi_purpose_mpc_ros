@@ -24,6 +24,7 @@ from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
 
 class ReferencePathVisualizer(Node):
     PKG_PATH: str = get_package_share_directory('multi_purpose_mpc_ros') + "/"
+    ADD_WP_MARKER: bool = False
 
     def __init__(self, config_path: str) -> None:
         super().__init__("reference_path_visualizer")
@@ -126,11 +127,12 @@ class ReferencePathVisualizer(Node):
             m.points.append(start)
             m.points.append(end)
             ref_path_marker_array.markers.append(m)
-            p = Point()
-            p.x = ref_path.waypoints[i].x
-            p.y = ref_path.waypoints[i].y
-            p.z = 0.0
-            spheres.points.append(p)
+            if self.ADD_WP_MARKER:
+                p = Point()
+                p.x = ref_path.waypoints[i].x
+                p.y = ref_path.waypoints[i].y
+                p.z = 0.0
+                spheres.points.append(p)
         ref_path_marker_array.markers.append(spheres)
         self._ref_path_pub.publish(ref_path_marker_array)
 
