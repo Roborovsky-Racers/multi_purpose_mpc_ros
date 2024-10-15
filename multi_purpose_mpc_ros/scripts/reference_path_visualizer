@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 
 import sys
-import threading
 
 # ROS 2
 import rclpy
 from rclpy.signals import SignalHandlerOptions
-from rclpy.executors import MultiThreadedExecutor
 
 # Project
 from multi_purpose_mpc_ros.reference_path_visualizer import ReferencePathVisualizer
@@ -17,7 +15,6 @@ def main(argv = sys.argv) -> None:
 
     args = parse_args_without_ros(argv)
     rclpy.init(args=argv, signal_handler_options=SignalHandlerOptions.NO)
-    executor = MultiThreadedExecutor(num_threads=2)
 
     node = ReferencePathVisualizer(args.config_path)
     try:
