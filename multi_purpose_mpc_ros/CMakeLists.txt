@@ -39,6 +39,7 @@ install(PROGRAMS
   scripts/path_constraints_provider
   scripts/publish_initialpose
   scripts/reference_path_visualizer
+  scripts/velocity_heat_odom_visualizer
   DESTINATION lib/${PROJECT_NAME}
 )
 
