@@ -9,7 +9,7 @@ from rclpy.signals import SignalHandlerOptions
 from rclpy.executors import MultiThreadedExecutor
 
 # Project
-from multi_purpose_mpc_ros.ref_path_visualizer import ReferencePathVisualizer
+from multi_purpose_mpc_ros.reference_path_visualizer import ReferencePathVisualizer
 from multi_purpose_mpc_ros.common import parse_args_without_ros
 
 
