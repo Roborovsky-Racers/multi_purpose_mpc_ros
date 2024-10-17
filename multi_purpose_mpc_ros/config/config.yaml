@@ -1,3 +1,6 @@
+common:
+  save_config: true
+
 sim_logger:
   animation_enabled: false
 

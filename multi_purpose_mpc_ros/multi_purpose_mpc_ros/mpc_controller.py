@@ -6,8 +6,10 @@ import dataclasses
 from scipy import sparse
 from scipy.sparse import dia_matrix
 import numpy as np
-import time
 import copy
+import os
+import shutil
+from datetime import datetime
 
 # ROS 2
 import rclpy
@@ -143,7 +145,8 @@ class MPCController(Node):
         self.USE_OBSTACLE_AVOIDANCE = self.get_parameter("use_obstacle_avoidance").get_parameter_value().bool_value
         self.use_stats = self.get_parameter("use_stats").get_parameter_value().bool_value
 
-        self._cfg = self._load_config(config_path)
+        self._config_path = config_path
+        self._cfg = self._load_config()
         self._odom: Optional[Odometry] = None
         self._enable_control = True
         self._initialize()
@@ -177,8 +180,18 @@ class MPCController(Node):
         self._group.destroy() # type: ignore
         super().destroy_node()
 
-    def _load_config(self, config_path: str) -> NamedTuple:
-        with open(config_path, "r") as f:
+    def _load_config(self) -> NamedTuple:
+
+        # logging content
+        with open(self._config_path, "r") as f:
+            config_content = f.read()
+            self.get_logger().info(
+                "\n" +
+                "----- config.yaml -----\n"+
+                config_content + "\n" +
+                "-----------------------")
+
+        with open(self._config_path, "r") as f:
             cfg: NamedTuple = convert_to_namedtuple(yaml.safe_load(f)) # type: ignore
 
         # Check if the files exist
@@ -250,7 +263,7 @@ class MPCController(Node):
                 elif param.name == "accel_low_pass_gain" and param.type_ == Parameter.Type.DOUBLE:
                     mpc_cfg.accel_low_pass_gain = param.value
                     self.get_logger().warn(f"accel_low_pass_gain was updated to '{param.value}'")
-                
+
                 elif param.name == "steer_low_pass_gain" and param.type_ == Parameter.Type.DOUBLE:
                     mpc_cfg.steer_low_pass_gain = param.value
                     self.get_logger().warn(f"steer_low_pass_gain was updated to '{param.value}'")
@@ -395,6 +408,16 @@ class MPCController(Node):
 
         # stats
         self._stats = ExecutionStats(self.get_logger(), window_size=50, record_count_threshold=1000)
+
+        # save config
+        if self._cfg.common.save_config:
+            self._save_config()
+
+    def _save_config(self) -> None:
+        now = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dst_dir = self.PKG_PATH + f"log/{now}"
+        os.makedirs(dst_dir, exist_ok=True)
+        shutil.copy(self._config_path, os.path.join(dst_dir, "config.yaml"))
 
     def _setup_pub_sub(self) -> None:
         # Publishers
