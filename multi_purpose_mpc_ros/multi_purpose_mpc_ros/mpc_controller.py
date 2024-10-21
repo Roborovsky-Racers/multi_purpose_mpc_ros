@@ -21,7 +21,7 @@ from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 
 from std_msgs.msg import Empty, Bool, Float32MultiArray, Float64MultiArray, Int32
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Quaternion, Pose2D, Point
+from geometry_msgs.msg import Quaternion, Pose2D, Point, Vector3
 from std_msgs.msg import ColorRGBA
 
 from rcl_interfaces.msg import SetParametersResult
@@ -46,21 +46,9 @@ from multi_purpose_mpc_ros.exexution_stats import ExecutionStats
 from multi_purpose_mpc_ros_msgs.msg import AckermannControlBoostCommand, PathConstraints, BorderCells
 
 
-RED = ColorRGBA()
-RED.a = 1.0
-RED.r = 1.0
-RED.g = 0.0
-RED.b = 0.0
-YELLOW = ColorRGBA()
-YELLOW.a = 1.0
-YELLOW.r = 1.0
-YELLOW.g = 1.0
-YELLOW.b = 0.0
-CYAN = ColorRGBA()
-CYAN.a = 1.0
-CYAN.r = 0.0
-CYAN.g = 156.0 / 255.0
-CYAN.b = 209.0 / 255.0
+RED = ColorRGBA(r=1.0, g=0.0, b=0.0, a=1.0)
+YELLOW = ColorRGBA(r=1.0, g=1.0, b=0.0, a=1.0)
+CYAN = ColorRGBA(r=0.0, g=156.0 / 255.0, b=209.0 / 255.0, a=1.0)
 
 def array_to_ackermann_control_command(stamp, u: np.ndarray, acc: float) -> AckermannControlCommand:
     msg = AckermannControlCommand()
@@ -442,6 +430,10 @@ class MPCController(Node):
         self._ref_path_pub_dummy = self.create_publisher(
             MarkerArray, "/planning/scenario_planning/lane_driving/behavior_planning/behavior_path_planner/debug/bound", latching_qos)
 
+        if self._cfg.common.publish_s_marker:
+            self._s_marker_pub = self.create_publisher(
+                MarkerArray, "/mpc/s_marker", latching_qos)
+
         # Subscribers
         self._odom_sub = self.create_subscription(
             Odometry, "/localization/kinematic_state", self._odom_callback, 1)
@@ -599,9 +591,7 @@ class MPCController(Node):
         m_base.type = Marker.SPHERE
         m_base.action = Marker.ADD
         m_base.pose.position.z = 0.0
-        m_base.scale.x = 0.5
-        m_base.scale.y = 0.5
-        m_base.scale.z = 0.5
+        m_base.scale = Vector3(x=0.5, y=0.5, z=0.5)
         m_base.color = self._pred_marker_color
         for i in range(len(x_pred)):
             m = copy.deepcopy(m_base)
@@ -613,7 +603,10 @@ class MPCController(Node):
         self._mpc_pred_pub_dummy.publish(pred_marker_array)
 
     def _publish_ref_path_marker(self, ref_path: ReferencePath):
+        WP_SPHERE_ENABLED = False
+
         ref_path_marker_array = MarkerArray()
+
         m_base = Marker()
         m_base.header.frame_id = "map"
         m_base.ns = "ref_path"
@@ -621,23 +614,8 @@ class MPCController(Node):
         m_base.action = Marker.ADD
         m_base.pose.position.z = 0.0
         m_base.scale.x = 0.2
-        m_base.color.a = 0.7
-        m_base.color.r = 0.0
-        m_base.color.g = 0.0
-        m_base.color.b = 1.0
-        spheres = Marker()
-        spheres.header.frame_id = "map"
-        spheres.ns = "ref_path_point"
-        spheres.type = Marker.SPHERE_LIST
-        spheres.action = Marker.ADD
-        radius = 0.2
-        spheres.scale.x = radius
-        spheres.scale.y = radius
-        spheres.scale.z = radius
-        spheres.color.a = 0.7
-        spheres.color.r = 1.0
-        spheres.color.g = 1.0
-        spheres.color.b = 0.0
+        m_base.color = ColorRGBA(r=0.0, g=0.0, b=1.0, a=0.7)
+
         for i in range(len(ref_path.waypoints) - 1):
             m = copy.deepcopy(m_base)
             m.id = i
@@ -651,15 +629,52 @@ class MPCController(Node):
             m.points.append(end) # type: ignore
             ref_path_marker_array.markers.append(m) # type: ignore
 
-            p = Point()
-            p.x = ref_path.waypoints[i].x
-            p.y = ref_path.waypoints[i].y
-            p.z = 0.
-            spheres.points.append(p) #type: ignore
-        ref_path_marker_array.markers.append(spheres) # type: ignore
+        if WP_SPHERE_ENABLED:
+            spheres = Marker()
+            spheres.header.frame_id = "map"
+            spheres.ns = "ref_path_point"
+            spheres.type = Marker.SPHERE_LIST
+            spheres.action = Marker.ADD
+            radius = 0.2
+            spheres.scale = Vector3(x=radius, y=radius, z=radius)
+            spheres.color = ColorRGBA(r=1.0, g=1.0, b=0.0, a=0.7)
+            for i in range(len(ref_path.waypoints) - 1):
+                p = Point()
+                p.x = ref_path.waypoints[i].x
+                p.y = ref_path.waypoints[i].y
+                p.z = 0.
+                spheres.points.append(p) #type: ignore
+            ref_path_marker_array.markers.append(spheres) # type: ignore
 
         self._ref_path_pub.publish(ref_path_marker_array)
         self._ref_path_pub_dummy.publish(ref_path_marker_array)
+
+    def _publish_s_marker(self, s: float):
+        if not hasattr(self, "_s_marker_id"):
+            self._s_marker_id = 0
+        if not hasattr(self, "_last_s_published"):
+            self._last_s_published = 0
+
+        if abs(s - self._last_s_published) < 3.0:
+            return
+
+        s_marker_array = MarkerArray()
+        text = Marker()
+        text.header.frame_id = "map"
+        text.ns = f"s_marker_{self._s_marker_id}"
+        text.type = Marker.TEXT_VIEW_FACING
+        text.action = Marker.ADD
+        text.pose.position = self._odom.pose.pose.position # type: ignore
+        text.pose.position.x -= 1.0
+        text.pose.position.y -= 1.0
+        text.pose.position.z = 10.0
+        text.scale.z = 1.0
+        text.text = f"{s:.2f}"
+        text.color = YELLOW
+        s_marker_array.markers.append(text) # type: ignore
+        self._s_marker_pub.publish(s_marker_array)
+        self._s_marker_id += 1
+        self._last_s_published = s
 
     def _control(self):
         now = self.get_clock().now()
@@ -733,6 +748,8 @@ class MPCController(Node):
         # else:
         #     self._mpc.update_vmax(kmh_to_m_per_sec(10.0))
 
+        if self._cfg.common.publish_s_marker: # type: ignore
+            self._publish_s_marker(self._car.s)
 
         # override by brake command if control is disabled
         if not self._enable_control:
