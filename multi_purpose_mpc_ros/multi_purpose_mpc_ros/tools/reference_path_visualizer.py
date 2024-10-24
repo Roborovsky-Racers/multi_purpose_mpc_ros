@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 
-import yaml
-from typing import NamedTuple
 import copy
 import numpy as np
 
 # ROS 2
 import rclpy
 from rclpy.node import Node
-from ament_index_python.packages import get_package_share_directory
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 
 from geometry_msgs.msg import Point, Vector3
@@ -16,70 +13,19 @@ from visualization_msgs.msg import Marker, MarkerArray
 from std_msgs.msg import ColorRGBA
 
 # Multi_Purpose_MPC
-from multi_purpose_mpc_ros.core.map import Map
 from multi_purpose_mpc_ros.core.reference_path import ReferencePath
-from multi_purpose_mpc_ros.core.utils import load_waypoints, load_ref_path
-
-# Project
-from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
+from multi_purpose_mpc_ros.tools.reference_path_generator import ReferencePathGenerator
 
 
 class ReferencePathVisualizer(Node):
-    PKG_PATH: str = get_package_share_directory('multi_purpose_mpc_ros') + "/"
-    WP_SPHERE_ENABLED: bool = True
-    LENGTH_TEXT_ENABLED: bool = True
+    WP_SPHERE_ENABLED: bool = False
+    LENGTH_TEXT_ENABLED: bool = False
 
     def __init__(self, config_path: str) -> None:
         super().__init__("reference_path_visualizer")
 
-        # Load configuration
-        self._cfg = self._load_config(config_path)
-        self._initialize()
+        self._reference_path = ReferencePathGenerator.get_reference_path(config_path)
         self._setup_publisher()
-
-    def _load_config(self, config_path: str) -> NamedTuple:
-        with open(config_path, "r") as f:
-            cfg: NamedTuple = convert_to_namedtuple(yaml.safe_load(f))
-
-        # Check if the files exist
-        mandatory_files = [cfg.map.yaml_path, cfg.waypoints.csv_path]
-        for file_path in mandatory_files:
-            file_exists(self.in_pkg_share(file_path))
-        return cfg
-
-    def _initialize(self) -> None:
-        def create_map() -> Map:
-            return Map(self.in_pkg_share(self._cfg.map.yaml_path))
-
-        def create_ref_path(map: Map) -> ReferencePath:
-            cfg_ref_path = self._cfg.reference_path
-
-            is_ref_path_given = cfg_ref_path.csv_path != ""
-            if is_ref_path_given:
-                self.get_logger().info("Using given reference path")
-                wp_x, wp_y, _, _ = load_ref_path(self.in_pkg_share(self._cfg.reference_path.csv_path))
-                return ReferencePath(
-                    map,
-                    wp_x,
-                    wp_y,
-                    cfg_ref_path.resolution,
-                    cfg_ref_path.smoothing_distance,
-                    cfg_ref_path.max_width,
-                    cfg_ref_path.circular)
-            else:
-                self.get_logger().info("Using waypoints to create reference path")
-                wp_x, wp_y = load_waypoints(self.in_pkg_share(self._cfg.waypoints.csv_path))
-                return ReferencePath(
-                    map,
-                    wp_x,
-                    wp_y,
-                    cfg_ref_path.resolution,
-                    cfg_ref_path.smoothing_distance,
-                    cfg_ref_path.max_width,
-                    cfg_ref_path.circular)
-
-        self._map = create_map()
-        self._reference_path = create_ref_path(self._map)
 
     def _setup_publisher(self) -> None:
         latching_qos = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
@@ -178,14 +124,9 @@ class ReferencePathVisualizer(Node):
 
         self._ref_path_pub.publish(ref_path_marker_array)
 
-    @classmethod
-    def in_pkg_share(cls, file_path: str) -> str:
-        return cls.PKG_PATH + file_path
-
-
 def main(args=None):
     rclpy.init(args=args)
-    config_path = "config/your_config_file.yaml"  # Replace with your actual config file path
+    config_path = "config/config.yaml"
     node = ReferencePathVisualizer(config_path)
     try:
         rclpy.spin(node)

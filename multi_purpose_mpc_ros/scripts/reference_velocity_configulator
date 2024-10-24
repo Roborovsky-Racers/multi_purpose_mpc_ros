@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+
+import sys
+import argparse
+
+# ROS 2
+import rclpy
+from rclpy.signals import SignalHandlerOptions
+
+# Project
+from multi_purpose_mpc_ros.tools.reference_velocity_configulator import ReferenceVelocityConfigulator
+from multi_purpose_mpc_ros.common import parse_args_without_ros
+
+def parse_args_without_ros(argv):
+    args_without_ros = rclpy.utilities.remove_ros_args(argv) # type: ignore
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ref_path_config_path", type=str, required=True,
+                        help="Path to the config file for reference path")
+    parser.add_argument("--ref_vel_config_path", type=str, required=True,
+                        help="Path to the config file for reference velocity")
+    return parser.parse_args(args_without_ros[1:])
+
+def main(argv = sys.argv) -> None:
+
+    args = parse_args_without_ros(argv)
+    rclpy.init(args=argv, signal_handler_options=SignalHandlerOptions.NO)
+
+    node = ReferenceVelocityConfigulator(
+        args.ref_path_config_path,
+        args.ref_vel_config_path)
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main(sys.argv)
