@@ -16,7 +16,7 @@ def launch_setup(context, *args, **kwargs):
         / "config.yaml"
     )
 
-    ref_vel_config_path = (
+    ref_vel_path = (
         Path(get_package_share_directory("multi_purpose_mpc_ros"))
         / "config"
         / "ref_vel.yaml"
@@ -29,10 +29,10 @@ def launch_setup(context, *args, **kwargs):
         output="both",
         emulate_tty=True,  # https://github.com/ros2/launch/issues/188
         arguments=[
-            "--ref_path_config_path",
+            "--config_path",
             str(ref_path_config_path),
-            "--ref_vel_config_path",
-            str(ref_vel_config_path),
+            "--ref_vel_path",
+            str(ref_vel_path),
             "--ros-args",
             "--log-level",
             "info",

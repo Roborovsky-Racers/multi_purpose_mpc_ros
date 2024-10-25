@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import yaml
-from typing import List, Tuple, Optional, NamedTuple
+from typing import List, Tuple, Optional, NamedTuple, Dict
 import dataclasses
 from scipy import sparse
 from scipy.sparse import dia_matrix
@@ -119,7 +119,7 @@ class MPCController(Node):
 
     KP = 100.0
 
-    def __init__(self, config_path: str) -> None:
+    def __init__(self, config_path: str, ref_vel_config_path: Optional[str]) -> None:
         super().__init__("mpc_controller") # type: ignore
 
         # declare parameters
@@ -134,6 +134,7 @@ class MPCController(Node):
         self.use_stats = self.get_parameter("use_stats").get_parameter_value().bool_value
 
         self._config_path = config_path
+        self._ref_vel_config_path: Optional[str] = ref_vel_config_path
         self._cfg = self._load_config()
         self._odom: Optional[Odometry] = None
         self._enable_control = True
@@ -369,11 +370,19 @@ class MPCController(Node):
                 "v_min": 0.0, "v_max": mpc_config.v_max, "ay_max": mpc_config.ay_max}
             car.reference_path.compute_speed_profile(speed_profile_constraints)
 
+        def create_ref_vel_map() -> Optional[Dict]:
+            if self._ref_vel_config_path is None:
+                return None
+            with open(self._ref_vel_config_path, "r") as f:
+                return yaml.safe_load(f) # type: ignore
+
         self._map = create_map()
         self._reference_path = create_ref_path(self._map)
         self._car = create_car(self._reference_path)
         self._mpc_cfg, self._mpc = create_mpc(self._car)
         compute_speed_profile(self._car, self._mpc_cfg)
+
+        self._ref_vel_config: Optional[Dict] = create_ref_vel_map()
 
         self._trajectory: Optional[Trajectory] = None
         self._path_constraints = None
@@ -676,6 +685,9 @@ class MPCController(Node):
         self._s_marker_id += 1
         self._last_s_published = s
 
+    def _get_ref_vel(self, waypoint: Waypoint) -> float:
+
+
     def _control(self):
         now = self.get_clock().now()
         t = (now - self._t_start).nanoseconds / 1e9
@@ -747,6 +759,8 @@ class MPCController(Node):
         #     self._mpc.update_vmax(kmh_to_m_per_sec(20.0))
         # else:
         #     self._mpc.update_vmax(kmh_to_m_per_sec(10.0))
+        if self._ref_vel_config is not None:
+            self._mpc.update_v_max(self._get_ref_vel(self._car.current_waypoint))
 
         if self._cfg.common.publish_s_marker: # type: ignore
             self._publish_s_marker(self._car.s)

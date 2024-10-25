@@ -22,7 +22,6 @@ def main(argv = sys.argv) -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
         rclpy.shutdown()
 
 

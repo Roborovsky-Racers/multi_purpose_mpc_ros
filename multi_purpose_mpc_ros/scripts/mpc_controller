@@ -20,7 +20,7 @@ def main(argv = sys.argv) -> None:
     executor = MultiThreadedExecutor(num_threads=2)
 
     try:
-        node = MPCController(args.config_path)
+        node = MPCController(args.config_path, args.ref_vel_path)
         executor.add_node(node)
         executor_thread = threading.Thread(target=executor.spin)
         executor_thread.start()

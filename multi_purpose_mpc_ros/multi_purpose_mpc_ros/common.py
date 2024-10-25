@@ -11,6 +11,8 @@ def parse_args_without_ros(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--config_path", type=str, required=True,
                         help="Path to the config.yaml file")
+    parser.add_argument("-r", "--ref_vel_path", type=str, required=False,
+                        help="Path to the ref_vel.yaml file")
     return parser.parse_args(args_without_ros[1:])
 
 # 再帰的に dict を namedtuple に変換する関数
