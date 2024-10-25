@@ -476,8 +476,9 @@ class MPCController(Node):
         steer_cmd = u[1]
 
         # compensate steering angle for the real vehicle
-        if not self.use_sim_time:
-            steer_cmd = steer_cmd * self._mpc_cfg.steering_tire_angle_gain_var
+        # AWSIMにおいても後段のactuation_cmd_converter でgainを考慮した指令を生成するため、実機/sim問わず
+        # gain を掛ける
+        steer_cmd = steer_cmd * self._mpc_cfg.steering_tire_angle_gain_var
 
         ackerman_cmd = array_to_ackermann_control_command(stamp.to_msg(), [v_cmd, steer_cmd], acc)
 
