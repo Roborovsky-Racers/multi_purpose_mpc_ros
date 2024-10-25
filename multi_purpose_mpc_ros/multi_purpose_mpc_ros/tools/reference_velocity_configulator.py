@@ -38,6 +38,7 @@ class ReferenceVelocityConfigulator(Node):
         super().__init__("reference_velocity_configulator") # type: ignore
         self._reference_path = ReferencePathGenerator.get_reference_path(ref_path_config_path)
         self._cfg: Dict = self._load_config(ref_vel_config_path)
+
         self._setup_publisher()
         self._register_params()
         self._timer = self.create_timer(2.0, self._timer_callback)
@@ -50,12 +51,24 @@ class ReferenceVelocityConfigulator(Node):
 
     def _register_params(self):
         def declatre_parameters():
-            for wp_name, ref_vel in self._cfg.items():
-                self.declare_parameter(f"{wp_name}", ref_vel)
+            for section_name, info in self._cfg.items():
+                for key, value in info.items():
+                    if key != "wp_id" and key != "ref_vel":
+                        raise ValueError(f"Invalid key: {key}")
+                    self.declare_parameter(f"{section_name}/{key}", value)
+            self.declare_parameter(f"save", False)
 
         def param_cb(parameters):
             for param in parameters:
-                self._cfg[param.name] = param.value
+                if param.name == "save":
+                    # TBD
+                    # if param.value:
+                    #     with open("config/ref_vel.yaml", "w") as f:
+                    #         yaml.dump(self._cfg, f)
+                    continue
+
+                section_name, param_name = param.name.split("/")
+                self._cfg[section_name][param_name] = param.value
             self._update_marker()
             return SetParametersResult(successful=True)
 
@@ -72,7 +85,12 @@ class ReferenceVelocityConfigulator(Node):
 
     def _update_marker(self):
 
-        def add_ref_path_marker(markers: MarkerArray, section_ref_vel_map: Dict) -> None:
+        class Section:
+            def __init__(self, name, ref_vel):
+                self.name = name
+                self.ref_vel = ref_vel
+
+        def add_ref_path_marker(markers: MarkerArray, wp_id_section_map: Dict[int, Section]) -> None:
             line_base = Marker()
             line_base.header.frame_id = "map"
             line_base.ns = "ref_path"
@@ -82,15 +100,15 @@ class ReferenceVelocityConfigulator(Node):
             line_base.scale.x = 0.2
 
             ref_path = self._reference_path
-            current_section_idx = -1
-            section_ref_vel_list = list(section_ref_vel_map.items())
-            _, current_ref_vel = section_ref_vel_list[current_section_idx]
+            current_section_idx: int = -1
+            wp_id_section_list: List[Tuple[int, Section]] = list(wp_id_section_map.items())
+            current_ref_vel = wp_id_section_list[current_section_idx][1].ref_vel
 
             for i in range(len(ref_path.waypoints) - 1):
-                if (current_section_idx < len(section_ref_vel_list)-1) and \
-                    (i >= section_ref_vel_list[current_section_idx + 1][0]):
+                if (current_section_idx < len(wp_id_section_list)-1) and \
+                    (i >= wp_id_section_list[current_section_idx + 1][0]):
                     current_section_idx += 1
-                    _, current_ref_vel = section_ref_vel_list[current_section_idx]
+                    current_ref_vel = wp_id_section_list[current_section_idx][1].ref_vel
                 line = copy.deepcopy(line_base)
                 line.id = i
                 line.color = self.create_vel_heat_color(current_ref_vel)
@@ -104,7 +122,7 @@ class ReferenceVelocityConfigulator(Node):
                 line.points.append(end) # type: ignore
                 markers.markers.append(line) # type: ignore
 
-        def add_section_markers(markers: MarkerArray, section_ref_vel_map: Dict) -> None:
+        def add_section_markers(markers: MarkerArray, wp_id_section_map: Dict) -> None:
             spheres = Marker()
             spheres.header.frame_id = "map"
             spheres.ns = "section_start_point"
@@ -121,32 +139,36 @@ class ReferenceVelocityConfigulator(Node):
             text_base.pose.position.z = 0.0
             text_base.scale.z = 1.8
 
-            for wp_idx, ref_vel in section_ref_vel_map.items():
+            for wp_id, section in wp_id_section_map.items():
                 p = Point()
-                p.x = self._reference_path.waypoints[wp_idx].x
-                p.y = self._reference_path.waypoints[wp_idx].y
+                p.x = self._reference_path.waypoints[wp_id].x
+                p.y = self._reference_path.waypoints[wp_id].y
                 p.z = 10.
                 spheres.points.append(p) #type: ignore
 
                 text = copy.deepcopy(text_base)
-                text.ns = f"ref_vel_{wp_idx}"
+                text.ns = f"ref_vel_sect_{section.name}"
                 text.pose.position = copy.deepcopy(p)
                 text.pose.position.x += 2.0
                 text.pose.position.y += 2.0
-                text.text = f"wp{wp_idx}:\n{ref_vel:.2f} kmph"
-                text.color = self.create_vel_heat_color(ref_vel)
+                text.text = f"{section.name}/wp{wp_id}:\n{section.ref_vel:.2f} kmph"
+                text.color = self.create_vel_heat_color(section.ref_vel)
                 markers.markers.append(text) # type: ignore
 
             markers.markers.append(spheres) # type: ignore
 
-        section_ref_vel_map = OrderedDict()
-        for wp_name, ref_vel in sorted(self._cfg.items(), key=lambda x: int(x[0].split("_")[-1])):
-            idx = wp_name.split("_")[-1]
-            section_ref_vel_map[int(idx)] = ref_vel
+        # {wp_id: ref_vel}の　dict であり、wp_idが昇順になるように並べる
+        sorted_dict: List[Tuple[int, Section]] = sorted(
+            (
+                ( int(v['wp_id']), Section(k, v['ref_vel']) ) for k, v in self._cfg.items()
+            ),
+            key=lambda item: int(item[0]) # sort by wp_id
+        )
+        wp_id_section_map: OrderedDict[int, Section] = OrderedDict(sorted_dict)
 
         ref_vel_marker_array = MarkerArray()
-        add_ref_path_marker(ref_vel_marker_array, section_ref_vel_map)
-        add_section_markers(ref_vel_marker_array, section_ref_vel_map)
+        add_ref_path_marker(ref_vel_marker_array, wp_id_section_map)
+        add_section_markers(ref_vel_marker_array, wp_id_section_map)
         self._ref_vel_marker_pub.publish(ref_vel_marker_array)
 
     @classmethod
@@ -171,7 +193,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
+        # node.destroy_node()
         rclpy.shutdown()
 
 
