@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
-from typing import Dict, List, Tuple, Optional, NamedTuple
+from typing import Dict, List, Tuple
 
+import os, shutil
+from datetime import datetime
 import copy
-import numpy as np
 import yaml
 from collections import OrderedDict
 
@@ -18,9 +19,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 from std_msgs.msg import ColorRGBA
 
 # Multi_Purpose_MPC
-from multi_purpose_mpc_ros.core.reference_path import ReferencePath
 from multi_purpose_mpc_ros.tools.reference_path_generator import ReferencePathGenerator
-from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
 
 RED = ColorRGBA(r=1.0, g=0.0, b=0.0, a=1.0)
 YELLOW = ColorRGBA(r=1.0, g=1.0, b=0.0, a=1.0)
@@ -36,6 +35,7 @@ class ReferenceVelocityConfigulator(Node):
             ref_path_config_path: str,
             ref_vel_config_path: str) -> None:
         super().__init__("reference_velocity_configulator") # type: ignore
+        self._ref_vel_config_path = ref_vel_config_path
         self._reference_path = ReferencePathGenerator.get_reference_path(ref_path_config_path)
         self._cfg: Dict = self._load_config(ref_vel_config_path)
 
@@ -60,11 +60,17 @@ class ReferenceVelocityConfigulator(Node):
 
         def param_cb(parameters):
             for param in parameters:
+
                 if param.name == "save":
-                    # TBD
-                    # if param.value:
-                    #     with open("config/ref_vel.yaml", "w") as f:
-                    #         yaml.dump(self._cfg, f)
+                    # backup current config file
+                    current_datetime = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    backup_filename = f"{self._ref_vel_config_path}.{current_datetime}"
+                    if os.path.exists(self._ref_vel_config_path):
+                        shutil.copy2(self._ref_vel_config_path, backup_filename)
+
+                    # save current config
+                    with open(self._ref_vel_config_path, 'w', encoding='utf-8') as file:
+                        yaml.dump(self._cfg, file, allow_unicode=True, default_flow_style=False)
                     continue
 
                 section_name, param_name = param.name.split("/")
