@@ -1,6 +1,6 @@
 sect_1:
   wp_id: 1
-  ref_vel: 25.0
+  ref_vel: 5.0
 
 sect_2:
   wp_id: 20

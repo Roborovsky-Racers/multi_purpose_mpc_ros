@@ -10,6 +10,7 @@ import copy
 import os
 import shutil
 from datetime import datetime
+from collections import OrderedDict
 
 # ROS 2
 import rclpy
@@ -370,11 +371,19 @@ class MPCController(Node):
                 "v_min": 0.0, "v_max": mpc_config.v_max, "ay_max": mpc_config.ay_max}
             car.reference_path.compute_speed_profile(speed_profile_constraints)
 
-        def create_ref_vel_map() -> Optional[Dict]:
+        def create_ref_vel_map() -> Optional[OrderedDict[int, float]]:
             if self._ref_vel_config_path is None:
                 return None
             with open(self._ref_vel_config_path, "r") as f:
-                return yaml.safe_load(f) # type: ignore
+                cfg: Dict =  yaml.safe_load(f) # type: ignore
+
+            sorted_dict = sorted(
+            (
+                ( int(v['wp_id']), v['ref_vel'] ) for k, v in cfg.items()
+            ),
+            key=lambda item: int(item[0]) # sort by wp_id
+            )
+            return OrderedDict(sorted_dict)
 
         self._map = create_map()
         self._reference_path = create_ref_path(self._map)
@@ -685,7 +694,30 @@ class MPCController(Node):
         self._s_marker_id += 1
         self._last_s_published = s
 
-    def _get_ref_vel(self, waypoint: Waypoint) -> float:
+    def _get_ref_vel(self, current_wp_id: int) -> float:
+        if self._ref_vel_config is None:
+            raise ValueError("Reference velocity config is not loaded.")
+
+        # セクションの始点となる waypoint ID を昇順にソート
+        sorted_keys = sorted(self._ref_vel_config.keys())
+        num_keys = len(sorted_keys)
+
+        for i in range(num_keys):
+            start = sorted_keys[i]
+            end = sorted_keys[(i + 1) % num_keys]  # 次のキー。最後は最初のキーに戻る
+            target_speed = self._ref_vel_config[start]
+
+            if start <= end:
+                # セクションが通常の順序の場合
+                if start <= current_wp_id < end:
+                    return target_speed
+            else:
+                # セクションがコースを一周する場合
+                if current_wp_id >= start or current_wp_id < end:
+                    return target_speed
+
+        # どのセクションにも該当しない場合 (通常はここには到達しない)
+        raise ValueError("Current waypoint ID does not fall into any section.")
 
 
     def _control(self):
@@ -760,7 +792,11 @@ class MPCController(Node):
         # else:
         #     self._mpc.update_vmax(kmh_to_m_per_sec(10.0))
         if self._ref_vel_config is not None:
-            self._mpc.update_v_max(self._get_ref_vel(self._car.current_waypoint))
+            ref_vel_mps = self._get_ref_vel(self._mpc.model.wp_id)
+            ref_vel_kmph = kmh_to_m_per_sec(ref_vel_mps)
+            self._mpc.update_v_max(ref_vel_kmph)
+            v_ref: List[float] = [ref_vel_kmph] * len(self._reference_path.waypoints)
+            self._reference_path.set_v_ref(v_ref)
 
         if self._cfg.common.publish_s_marker: # type: ignore
             self._publish_s_marker(self._car.s)
