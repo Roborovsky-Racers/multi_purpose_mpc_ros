@@ -427,6 +427,8 @@ class MPCController(Node):
         else:
           self._command_pub = self.create_publisher(
             AckermannControlCommand, "/control/command/control_cmd", 1)
+          self._command_raw_pub = self.create_publisher(
+            AckermannControlCommand, "/control/command/control_cmd_raw", 1)
           print("use normal ackermann control command")
 
         # NOTE:評価環境での可視化のためにダミーのトピック名を使用
@@ -475,11 +477,6 @@ class MPCController(Node):
         v_cmd = u[0]
         steer_cmd = u[1]
 
-        # compensate steering angle for the real vehicle
-        # AWSIMにおいても後段のactuation_cmd_converter でgainを考慮した指令を生成するため、実機/sim問わず
-        # gain を掛ける
-        steer_cmd = steer_cmd * self._mpc_cfg.steering_tire_angle_gain_var
-
         ackerman_cmd = array_to_ackermann_control_command(stamp.to_msg(), [v_cmd, steer_cmd], acc)
 
         if not self.USE_BUG_ACC:
@@ -489,6 +486,19 @@ class MPCController(Node):
         ackerman_boost_cmd.command = ackerman_cmd
         ackerman_boost_cmd.boost_mode = bug_acc_enabled
         return ackerman_boost_cmd
+
+    def _publish_control_command(self, stamp, u, acc, bug_acc_enabled):
+        cmd = self._create_ackerman_control_command(stamp, u, acc, bug_acc_enabled)
+
+        # publish raw control command
+        self._command_raw_pub.publish(cmd)
+
+        # compensate steering angle for the real vehicle
+        # AWSIMにおいても後段のactuation_cmd_converter でgainを考慮した指令を生成するため、実機/sim問わず
+        # gain を掛ける
+        cmd.lateral.steering_tire_angle *= self._mpc_cfg.steering_tire_angle_gain_var
+        self._command_pub.publish(cmd)
+
 
     def _odom_callback(self, msg: Odometry) -> None:
         self._odom = msg
@@ -786,8 +796,7 @@ class MPCController(Node):
         self._car.drive([v, u[1]])
 
         # Publish control command
-        cmd = self._create_ackerman_control_command(now, u, acc, bug_acc_enabled)
-        self._command_pub.publish(cmd)
+        self._publish_control_command(now, u, acc, bug_acc_enabled)
 
         # Log states
         self._sim_logger.log(self._car, u, t)
