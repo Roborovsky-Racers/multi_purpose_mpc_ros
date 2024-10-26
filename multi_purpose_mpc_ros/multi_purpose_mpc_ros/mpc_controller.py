@@ -232,6 +232,14 @@ class MPCController(Node):
             cfg_mpc = self._cfg.mpc
             self.declare_parameter("v_max", cfg_mpc.v_max)
             self.declare_parameter("steering_tire_angle_gain_var", cfg_mpc.steering_tire_angle_gain_var)
+            self.declare_parameter("Q0", cfg_mpc.Q[0])
+            self.declare_parameter("Q1", cfg_mpc.Q[1])
+            self.declare_parameter("Q2", cfg_mpc.Q[2])
+            self.declare_parameter("R0", cfg_mpc.R[0])
+            self.declare_parameter("R1", cfg_mpc.R[1])
+            self.declare_parameter("QN0", cfg_mpc.QN[0])
+            self.declare_parameter("QN1", cfg_mpc.QN[1])
+            self.declare_parameter("QN2", cfg_mpc.QN[2])
 
             mpc_cfg = self._mpc_cfg
             self.declare_parameter("ay_max", mpc_cfg.ay_max)
@@ -240,7 +248,26 @@ class MPCController(Node):
             self.declare_parameter("wp_id_offset", mpc_cfg.wp_id_offset)
 
         def param_cb(parameters):
+            cfg_mpc = self._cfg.mpc # type: ignore
             mpc_cfg = self._mpc_cfg
+
+            def update_Q(index: int, value: float):
+                cfg_mpc.Q[index] = value
+                mpc_cfg.Q = sparse.diags(cfg_mpc.Q)
+                self._mpc.update_Q(mpc_cfg.Q)
+                self.get_logger().warn(f"Q[{index}] was updated to '{value}'")
+
+            def update_R(index: int, value: float):
+                cfg_mpc.R[index] = value
+                mpc_cfg.R = sparse.diags(cfg_mpc.R)
+                self._mpc.update_R(mpc_cfg.R)
+                self.get_logger().warn(f"R[{index}] was updated to '{value}'")
+
+            def update_QN(index: int, value: float):
+                cfg_mpc.QN[index] = value
+                mpc_cfg.QN = sparse.diags(cfg_mpc.QN)
+                self._mpc.update_QN(mpc_cfg.QN)
+                self.get_logger().warn(f"QN[{index}] was updated to '{value}'")
 
             for param in parameters:
                 if param.name == "v_max" and param.type_ == Parameter.Type.DOUBLE:
@@ -254,6 +281,26 @@ class MPCController(Node):
                 elif param.name == "steering_tire_angle_gain_var" and param.type_ == Parameter.Type.DOUBLE:
                     mpc_cfg.steering_tire_angle_gain_var = param.value
                     self.get_logger().warn(f"steering_tire_angle_gain_var was updated to '{param.value}'")
+
+                elif param.name == "Q0" and param.type_ == Parameter.Type.DOUBLE:
+                    update_Q(0, param.value)
+                elif param.name == "Q1" and param.type_ == Parameter.Type.DOUBLE:
+                    update_Q(1, param.value)
+                elif param.name == "Q2" and param.type_ == Parameter.Type.DOUBLE:
+                    update_Q(2, param.value)
+
+
+                elif param.name == "R0" and param.type_ == Parameter.Type.DOUBLE:
+                    update_R(0, param.value)
+                elif param.name == "R1" and param.type_ == Parameter.Type.DOUBLE:
+                    update_R(1, param.value)
+
+                elif param.name == "QN0" and param.type_ == Parameter.Type.DOUBLE:
+                    update_QN(0, param.value)
+                elif param.name == "QN1" and param.type_ == Parameter.Type.DOUBLE:
+                    update_QN(1, param.value)
+                elif param.name == "QN2" and param.type_ == Parameter.Type.DOUBLE:
+                    update_QN(2, param.value)
 
                 elif param.name == "ay_max" and param.type_ == Parameter.Type.DOUBLE:
                     mpc_cfg.ay_max = param.value
@@ -369,6 +416,9 @@ class MPCController(Node):
                 state_constraints,
                 input_constraints,
                 mpc_cfg.ay_max,
+                0.35 / 1.639,
+                # 0.35,
+                # 0.35 * 1.639,
                 mpc_cfg.wp_id_offset,
                 self.USE_OBSTACLE_AVOIDANCE,
                 self._cfg.reference_path.use_path_constraints_topic)
