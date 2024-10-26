@@ -14,8 +14,10 @@ def main(argv = sys.argv) -> None:
 
     args = parse_args_without_ros(argv)
     rclpy.init(args=argv, signal_handler_options=SignalHandlerOptions.NO)
+    node = rclpy.create_node('reference_velocity_configulator')
 
-    node = ReferenceVelocityConfigulator(
+    ref_vel_configulator = ReferenceVelocityConfigulator(
+        node,
         args.config_path,
         args.ref_vel_path)
     try:

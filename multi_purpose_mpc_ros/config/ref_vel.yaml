@@ -1,24 +1,19 @@
-sect_1:
-  wp_id: 1
-  ref_vel: 5.0
-
-sect_2:
-  wp_id: 20
-  ref_vel: 30.0
-
-sect_3:
-  wp_id: 55
-  ref_vel: 25.0
-
-sect_4:
-  wp_id: 131
-  ref_vel: 30.0
-
-sect_5:
-  wp_id: 156
-  ref_vel: 25.0
-
-sect_6:
-  wp_id: 320
-  ref_vel: 20.0
-
+ref_vel_configulator:
+  s1:
+    ref_vel: 25.0
+    wp_id: 1
+  s2:
+    ref_vel: 30.0
+    wp_id: 20
+  s3:
+    ref_vel: 25.0
+    wp_id: 55
+  s4:
+    ref_vel: 30.0
+    wp_id: 131
+  s5:
+    ref_vel: 25.0
+    wp_id: 156
+  sect_6:
+    ref_vel: 20.0
+    wp_id: 320

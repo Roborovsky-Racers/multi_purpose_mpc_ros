@@ -45,6 +45,7 @@ from multi_purpose_mpc_ros.simulation_logger import SimulationLogger
 from multi_purpose_mpc_ros.obstacle_manager import ObstacleManager
 from multi_purpose_mpc_ros.exexution_stats import ExecutionStats
 from multi_purpose_mpc_ros_msgs.msg import AckermannControlBoostCommand, PathConstraints, BorderCells
+from multi_purpose_mpc_ros.tools.reference_velocity_configulator import ReferenceVelocityConfigulator
 
 
 RED = ColorRGBA(r=1.0, g=0.0, b=0.0, a=1.0)
@@ -180,6 +181,15 @@ class MPCController(Node):
                 "----- config.yaml -----\n"+
                 config_content + "\n" +
                 "-----------------------")
+
+        if self._ref_vel_config_path is not None:
+            with open(self._ref_vel_config_path, "r") as f:
+                ref_vel_config_content = f.read()
+                self.get_logger().info(
+                    "\n" +
+                    "----- ref_vel.yaml -----\n"+
+                    ref_vel_config_content + "\n" +
+                    "-----------------------")
 
         with open(self._config_path, "r") as f:
             cfg: NamedTuple = convert_to_namedtuple(yaml.safe_load(f)) # type: ignore
@@ -371,19 +381,10 @@ class MPCController(Node):
                 "v_min": 0.0, "v_max": mpc_config.v_max, "ay_max": mpc_config.ay_max}
             car.reference_path.compute_speed_profile(speed_profile_constraints)
 
-        def create_ref_vel_map() -> Optional[OrderedDict[int, float]]:
+        def create_ref_vel_configulator() -> Optional[ReferenceVelocityConfigulator]:
             if self._ref_vel_config_path is None:
                 return None
-            with open(self._ref_vel_config_path, "r") as f:
-                cfg: Dict =  yaml.safe_load(f) # type: ignore
-
-            sorted_dict = sorted(
-            (
-                ( int(v['wp_id']), v['ref_vel'] ) for k, v in cfg.items()
-            ),
-            key=lambda item: int(item[0]) # sort by wp_id
-            )
-            return OrderedDict(sorted_dict)
+            return ReferenceVelocityConfigulator(self, self._config_path, self._ref_vel_config_path)
 
         self._map = create_map()
         self._reference_path = create_ref_path(self._map)
@@ -391,7 +392,7 @@ class MPCController(Node):
         self._mpc_cfg, self._mpc = create_mpc(self._car)
         compute_speed_profile(self._car, self._mpc_cfg)
 
-        self._ref_vel_config: Optional[Dict] = create_ref_vel_map()
+        self._ref_vel_configulator: Optional[ReferenceVelocityConfigulator] = create_ref_vel_configulator()
 
         self._trajectory: Optional[Trajectory] = None
         self._path_constraints = None
@@ -694,30 +695,30 @@ class MPCController(Node):
         self._s_marker_id += 1
         self._last_s_published = s
 
-    def _get_ref_vel(self, current_wp_id: int) -> float:
-        if self._ref_vel_config is None:
-            raise ValueError("Reference velocity config is not loaded.")
+    # def _get_ref_vel(self, current_wp_id: int) -> float:
+    #     if self._ref_vel_config is None:
+    #         raise ValueError("Reference velocity config is not loaded.")
 
-        # セクションの始点となる waypoint ID を昇順にソート
-        sorted_keys = sorted(self._ref_vel_config.keys())
-        num_keys = len(sorted_keys)
+    #     # セクションの始点となる waypoint ID を昇順にソート
+    #     sorted_keys = sorted(self._ref_vel_config.keys())
+    #     num_keys = len(sorted_keys)
 
-        for i in range(num_keys):
-            start = sorted_keys[i]
-            end = sorted_keys[(i + 1) % num_keys]  # 次のキー。最後は最初のキーに戻る
-            target_speed = self._ref_vel_config[start]
+    #     for i in range(num_keys):
+    #         start = sorted_keys[i]
+    #         end = sorted_keys[(i + 1) % num_keys]  # 次のキー。最後は最初のキーに戻る
+    #         target_speed = self._ref_vel_config[start]
 
-            if start <= end:
-                # セクションが通常の順序の場合
-                if start <= current_wp_id < end:
-                    return target_speed
-            else:
-                # セクションがコースを一周する場合
-                if current_wp_id >= start or current_wp_id < end:
-                    return target_speed
+    #         if start <= end:
+    #             # セクションが通常の順序の場合
+    #             if start <= current_wp_id < end:
+    #                 return target_speed
+    #         else:
+    #             # セクションがコースを一周する場合
+    #             if current_wp_id >= start or current_wp_id < end:
+    #                 return target_speed
 
-        # どのセクションにも該当しない場合 (通常はここには到達しない)
-        raise ValueError("Current waypoint ID does not fall into any section.")
+    #     # どのセクションにも該当しない場合 (通常はここには到達しない)
+    #     raise ValueError("Current waypoint ID does not fall into any section.")
 
 
     def _control(self):
@@ -791,8 +792,8 @@ class MPCController(Node):
         #     self._mpc.update_vmax(kmh_to_m_per_sec(20.0))
         # else:
         #     self._mpc.update_vmax(kmh_to_m_per_sec(10.0))
-        if self._ref_vel_config is not None:
-            ref_vel_mps = self._get_ref_vel(self._mpc.model.wp_id)
+        if self._ref_vel_configulator is not None:
+            ref_vel_mps = self._ref_vel_configulator.get_ref_vel(self._mpc.model.wp_id)
             ref_vel_kmph = kmh_to_m_per_sec(ref_vel_mps)
             self._mpc.update_v_max(ref_vel_kmph)
             v_ref: List[float] = [ref_vel_kmph] * len(self._reference_path.waypoints)
@@ -875,7 +876,7 @@ class MPCController(Node):
         self._car.update_states(pose.x, pose.y, pose.theta)
         self._car.update_reference_path(self._car.reference_path)
 
-        self._publish_ref_path_marker(self._car.reference_path)
+        # self._publish_ref_path_marker(self._car.reference_path)
         self._pred_marker_color = CYAN
 
         # for i in range(10):
