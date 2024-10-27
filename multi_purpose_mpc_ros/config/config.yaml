@@ -51,6 +51,7 @@ mpc:
   a_max: 2.0 # m/s^2
   ay_max: 5.5 # m/s^2, maximum lateral acceleration in curves
   delta_max_deg: 32.0 # degrees
+  steer_rate_max: 0.35 # rad/s
   control_rate: 40.0 # Hz
   steering_tire_angle_gain_var: 1.639
   # steering_tire_angle_gain_var: 1.0

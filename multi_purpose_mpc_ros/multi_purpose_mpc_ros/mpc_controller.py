@@ -110,6 +110,7 @@ class MPCConfig:
     a_max: float
     ay_max: float
     delta_max: float
+    steer_rate_max: float
     control_rate: float
     steering_tire_angle_gain_var: float
     accel_low_pass_gain: float
@@ -394,6 +395,7 @@ class MPCController(Node):
                 cfg_mpc.a_max,
                 cfg_mpc.ay_max,
                 np.deg2rad(cfg_mpc.delta_max_deg),
+                cfg_mpc.steer_rate_max,
                 cfg_mpc.control_rate,
                 cfg_mpc.steering_tire_angle_gain_var,
                 cfg_mpc.accel_low_pass_gain,
@@ -407,6 +409,10 @@ class MPCController(Node):
                 "umin": np.array([0.0, -np.tan(mpc_cfg.delta_max) / car.length]),
                 "umax": np.array([mpc_cfg.v_max, np.tan(mpc_cfg.delta_max) / car.length])}
 
+            # mpcからのsteer指令出力は、gainを掛けて出力され、その状態で車体のsteer rate limit が適用されるため、
+            # mpcの制御計算におけるsteer_rate_maxは、実際のsteer_rate_maxをgainで除した値で設定する
+            scaled_steer_rate_max = mpc_cfg.steer_rate_max / mpc_cfg.steering_tire_angle_gain_var
+
             mpc = MPC(
                 car,
                 mpc_cfg.N,
@@ -416,9 +422,7 @@ class MPCController(Node):
                 state_constraints,
                 input_constraints,
                 mpc_cfg.ay_max,
-                0.35 / 1.639,
-                # 0.35,
-                # 0.35 * 1.639,
+                scaled_steer_rate_max,
                 mpc_cfg.wp_id_offset,
                 self.USE_OBSTACLE_AVOIDANCE,
                 self._cfg.reference_path.use_path_constraints_topic)
