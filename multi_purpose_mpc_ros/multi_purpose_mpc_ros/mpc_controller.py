@@ -110,6 +110,7 @@ class MPCConfig:
     a_max: float
     ay_max: float
     delta_max: float
+    steer_rate_max: float
     control_rate: float
     steering_tire_angle_gain_var: float
     accel_low_pass_gain: float
@@ -232,6 +233,14 @@ class MPCController(Node):
             cfg_mpc = self._cfg.mpc
             self.declare_parameter("v_max", cfg_mpc.v_max)
             self.declare_parameter("steering_tire_angle_gain_var", cfg_mpc.steering_tire_angle_gain_var)
+            self.declare_parameter("Q0", cfg_mpc.Q[0])
+            self.declare_parameter("Q1", cfg_mpc.Q[1])
+            self.declare_parameter("Q2", cfg_mpc.Q[2])
+            self.declare_parameter("R0", cfg_mpc.R[0])
+            self.declare_parameter("R1", cfg_mpc.R[1])
+            self.declare_parameter("QN0", cfg_mpc.QN[0])
+            self.declare_parameter("QN1", cfg_mpc.QN[1])
+            self.declare_parameter("QN2", cfg_mpc.QN[2])
 
             mpc_cfg = self._mpc_cfg
             self.declare_parameter("ay_max", mpc_cfg.ay_max)
@@ -240,7 +249,26 @@ class MPCController(Node):
             self.declare_parameter("wp_id_offset", mpc_cfg.wp_id_offset)
 
         def param_cb(parameters):
+            cfg_mpc = self._cfg.mpc # type: ignore
             mpc_cfg = self._mpc_cfg
+
+            def update_Q(index: int, value: float):
+                cfg_mpc.Q[index] = value
+                mpc_cfg.Q = sparse.diags(cfg_mpc.Q)
+                self._mpc.update_Q(mpc_cfg.Q)
+                self.get_logger().warn(f"Q[{index}] was updated to '{value}'")
+
+            def update_R(index: int, value: float):
+                cfg_mpc.R[index] = value
+                mpc_cfg.R = sparse.diags(cfg_mpc.R)
+                self._mpc.update_R(mpc_cfg.R)
+                self.get_logger().warn(f"R[{index}] was updated to '{value}'")
+
+            def update_QN(index: int, value: float):
+                cfg_mpc.QN[index] = value
+                mpc_cfg.QN = sparse.diags(cfg_mpc.QN)
+                self._mpc.update_QN(mpc_cfg.QN)
+                self.get_logger().warn(f"QN[{index}] was updated to '{value}'")
 
             for param in parameters:
                 if param.name == "v_max" and param.type_ == Parameter.Type.DOUBLE:
@@ -254,6 +282,26 @@ class MPCController(Node):
                 elif param.name == "steering_tire_angle_gain_var" and param.type_ == Parameter.Type.DOUBLE:
                     mpc_cfg.steering_tire_angle_gain_var = param.value
                     self.get_logger().warn(f"steering_tire_angle_gain_var was updated to '{param.value}'")
+
+                elif param.name == "Q0" and param.type_ == Parameter.Type.DOUBLE:
+                    update_Q(0, param.value)
+                elif param.name == "Q1" and param.type_ == Parameter.Type.DOUBLE:
+                    update_Q(1, param.value)
+                elif param.name == "Q2" and param.type_ == Parameter.Type.DOUBLE:
+                    update_Q(2, param.value)
+
+
+                elif param.name == "R0" and param.type_ == Parameter.Type.DOUBLE:
+                    update_R(0, param.value)
+                elif param.name == "R1" and param.type_ == Parameter.Type.DOUBLE:
+                    update_R(1, param.value)
+
+                elif param.name == "QN0" and param.type_ == Parameter.Type.DOUBLE:
+                    update_QN(0, param.value)
+                elif param.name == "QN1" and param.type_ == Parameter.Type.DOUBLE:
+                    update_QN(1, param.value)
+                elif param.name == "QN2" and param.type_ == Parameter.Type.DOUBLE:
+                    update_QN(2, param.value)
 
                 elif param.name == "ay_max" and param.type_ == Parameter.Type.DOUBLE:
                     mpc_cfg.ay_max = param.value
@@ -347,6 +395,7 @@ class MPCController(Node):
                 cfg_mpc.a_max,
                 cfg_mpc.ay_max,
                 np.deg2rad(cfg_mpc.delta_max_deg),
+                cfg_mpc.steer_rate_max,
                 cfg_mpc.control_rate,
                 cfg_mpc.steering_tire_angle_gain_var,
                 cfg_mpc.accel_low_pass_gain,
@@ -360,6 +409,10 @@ class MPCController(Node):
                 "umin": np.array([0.0, -np.tan(mpc_cfg.delta_max) / car.length]),
                 "umax": np.array([mpc_cfg.v_max, np.tan(mpc_cfg.delta_max) / car.length])}
 
+            # mpcからのsteer指令出力は、gainを掛けて出力され、その状態で車体のsteer rate limit が適用されるため、
+            # mpcの制御計算におけるsteer_rate_maxは、実際のsteer_rate_maxをgainで除した値で設定する
+            scaled_steer_rate_max = mpc_cfg.steer_rate_max / mpc_cfg.steering_tire_angle_gain_var
+
             mpc = MPC(
                 car,
                 mpc_cfg.N,
@@ -369,6 +422,7 @@ class MPCController(Node):
                 state_constraints,
                 input_constraints,
                 mpc_cfg.ay_max,
+                scaled_steer_rate_max,
                 mpc_cfg.wp_id_offset,
                 self.USE_OBSTACLE_AVOIDANCE,
                 self._cfg.reference_path.use_path_constraints_topic)
@@ -427,6 +481,8 @@ class MPCController(Node):
         else:
           self._command_pub = self.create_publisher(
             AckermannControlCommand, "/control/command/control_cmd", 1)
+          self._command_raw_pub = self.create_publisher(
+            AckermannControlCommand, "/control/command/control_cmd_raw", 1)
           print("use normal ackermann control command")
 
         # NOTE:評価環境での可視化のためにダミーのトピック名を使用
@@ -475,10 +531,6 @@ class MPCController(Node):
         v_cmd = u[0]
         steer_cmd = u[1]
 
-        # compensate steering angle for the real vehicle
-        if not self.use_sim_time:
-            steer_cmd = steer_cmd * self._mpc_cfg.steering_tire_angle_gain_var
-
         ackerman_cmd = array_to_ackermann_control_command(stamp.to_msg(), [v_cmd, steer_cmd], acc)
 
         if not self.USE_BUG_ACC:
@@ -488,6 +540,19 @@ class MPCController(Node):
         ackerman_boost_cmd.command = ackerman_cmd
         ackerman_boost_cmd.boost_mode = bug_acc_enabled
         return ackerman_boost_cmd
+
+    def _publish_control_command(self, stamp, u, acc, bug_acc_enabled):
+        cmd = self._create_ackerman_control_command(stamp, u, acc, bug_acc_enabled)
+
+        # publish raw control command
+        self._command_raw_pub.publish(cmd)
+
+        # compensate steering angle for the real vehicle
+        # AWSIMにおいても後段のactuation_cmd_converter でgainを考慮した指令を生成するため、実機/sim問わず
+        # gain を掛ける
+        cmd.lateral.steering_tire_angle *= self._mpc_cfg.steering_tire_angle_gain_var
+        self._command_pub.publish(cmd)
+
 
     def _odom_callback(self, msg: Odometry) -> None:
         self._odom = msg
@@ -785,8 +850,7 @@ class MPCController(Node):
         self._car.drive([v, u[1]])
 
         # Publish control command
-        cmd = self._create_ackerman_control_command(now, u, acc, bug_acc_enabled)
-        self._command_pub.publish(cmd)
+        self._publish_control_command(now, u, acc, bug_acc_enabled)
 
         # Log states
         self._sim_logger.log(self._car, u, t)

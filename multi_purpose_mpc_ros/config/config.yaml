@@ -40,20 +40,23 @@ bicycle_model:
 
 mpc:
   N: 20
-  Q: [3.0, 80.0, 0.08]  # [v, delta, t]
-  # Q: [3.0, 100.0, 5.0]  # [v, delta, t]
-  # Q: [5.0, 90.0, 5.0]  # [v, delta, t]
-  # Q: [10.0, 80.0, 5.0]  # [v, delta, t]
-  R: [1.0, 500.0]      # [v, delta]
-  QN: [5.0, 500.0, 0.08]  # [v, delta, t]
-  v_max: 25.0 # km/h
+  # Q: [e_y, e_psi, t]
+  # R: [v, delta]
+  # QN: [e_y, e_psi, t]
+  Q: [1000000.0, 100000000.0, 0.0]
+  QN: [1000000.0, 1000.0, 0.0]
+  R: [100000.0, 0.0]
+  v_max: 30.0 # km/h
   a_min: -1.6 # m/s^2
   a_max: 2.0 # m/s^2
   ay_max: 5.5 # m/s^2, maximum lateral acceleration in curves
-  delta_max_deg: 35.0 # degrees
+  delta_max_deg: 32.0 # degrees
+  steer_rate_max: 0.35 # rad/s
   control_rate: 40.0 # Hz
   steering_tire_angle_gain_var: 1.639
-  accel_low_pass_gain: 0.1
-  steer_low_pass_gain: 0.3
-  wp_id_offset: 3
-
+  # steering_tire_angle_gain_var: 1.0
+  # accel_low_pass_gain: 0.1
+  # steer_low_pass_gain: 0.3
+  accel_low_pass_gain: 1.0
+  steer_low_pass_gain: 1.0
+  wp_id_offset: 2
