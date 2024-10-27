@@ -36,6 +36,7 @@ def launch_setup(context, *args, **kwargs):
         name="mpc_controller",
         output="both",
         emulate_tty=True,  # https://github.com/ros2/launch/issues/188
+        sigterm_timeout="10",
         arguments=[
             "--config_path",
             str(config_path),
