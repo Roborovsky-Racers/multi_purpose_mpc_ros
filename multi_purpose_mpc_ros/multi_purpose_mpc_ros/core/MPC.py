@@ -46,10 +46,6 @@ class MPC:
         
         # 追加: ステアリングレート制限関連のパラメータ
         self.max_steering_rate = max_steering_rate
-        self.dt = model.Ts
-        print("=====================================================")
-        print(f"Ts: {self.dt}, max_steering_rate: {self.max_steering_rate}")
-        print("=====================================================")
         self.previous_steering = 0.0  # 前回のステア角
         
         # 既存の初期化
@@ -196,7 +192,7 @@ class MPC:
         uineq_basic = np.hstack([xmax_dyn, umax_dyn])
 
         # ステアリングレート制約の境界
-        max_delta_change = self.max_steering_rate * self.dt
+        max_delta_change = self.max_steering_rate * self.model.Ts
         lineq_rate = -max_delta_change * np.ones(n_rate_constraints)
         uineq_rate = max_delta_change * np.ones(n_rate_constraints)
 
@@ -225,8 +221,8 @@ class MPC:
         """
         Get control signal given the current position of the car.
         """
-        nx = self.model.n_states
-        nu = 2
+        nx = self.nx
+        nu = self.nu
 
         self.model.get_current_waypoint()
 
@@ -263,7 +259,7 @@ class MPC:
             delta = control_signals[1]
             
             # ステアレートの制限を適用
-            max_delta_change = self.max_steering_rate * self.dt
+            max_delta_change = self.max_steering_rate * self.model.Ts
             delta = np.clip(
                 delta,
                 self.previous_steering - max_delta_change,
