@@ -1,6 +1,5 @@
 common:
   save_config: true
-  publish_s_marker: true
 
 sim_logger:
   animation_enabled: false

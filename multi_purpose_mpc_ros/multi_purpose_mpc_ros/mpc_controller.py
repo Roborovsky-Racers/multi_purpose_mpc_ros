@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import yaml
-from typing import List, Tuple, Optional, NamedTuple, Dict
+from typing import List, Tuple, Optional, NamedTuple
 import dataclasses
 from scipy import sparse
 from scipy.sparse import dia_matrix
@@ -10,7 +10,6 @@ import copy
 import os
 import shutil
 from datetime import datetime
-from collections import OrderedDict
 
 # ROS 2
 import rclpy
@@ -37,7 +36,7 @@ from multi_purpose_mpc_ros.core.map import Map, Obstacle
 from multi_purpose_mpc_ros.core.reference_path import ReferencePath
 from multi_purpose_mpc_ros.core.spatial_bicycle_models import BicycleModel
 from multi_purpose_mpc_ros.core.MPC import MPC
-from multi_purpose_mpc_ros.core.utils import load_waypoints, m_per_sec_to_kmh, kmh_to_m_per_sec, load_ref_path
+from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec, load_ref_path
 
 # Project
 from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
@@ -449,10 +448,6 @@ class MPCController(Node):
         self._ref_path_pub_dummy = self.create_publisher(
             MarkerArray, "/planning/scenario_planning/lane_driving/behavior_planning/behavior_path_planner/debug/bound", latching_qos)
 
-        if self._cfg.common.publish_s_marker:
-            self._s_marker_pub = self.create_publisher(
-                MarkerArray, "/mpc/s_marker", latching_qos)
-
         # Subscribers
         self._odom_sub = self.create_subscription(
             Odometry, "/localization/kinematic_state", self._odom_callback, 1)
@@ -668,59 +663,6 @@ class MPCController(Node):
         self._ref_path_pub.publish(ref_path_marker_array)
         self._ref_path_pub_dummy.publish(ref_path_marker_array)
 
-    def _publish_s_marker(self, s: float):
-        if not hasattr(self, "_s_marker_id"):
-            self._s_marker_id = 0
-        if not hasattr(self, "_last_s_published"):
-            self._last_s_published = 0
-
-        if abs(s - self._last_s_published) < 3.0:
-            return
-
-        s_marker_array = MarkerArray()
-        text = Marker()
-        text.header.frame_id = "map"
-        text.ns = f"s_marker_{self._s_marker_id}"
-        text.type = Marker.TEXT_VIEW_FACING
-        text.action = Marker.ADD
-        text.pose.position = self._odom.pose.pose.position # type: ignore
-        text.pose.position.x -= 1.0
-        text.pose.position.y -= 1.0
-        text.pose.position.z = 10.0
-        text.scale.z = 1.0
-        text.text = f"{s:.2f}"
-        text.color = YELLOW
-        s_marker_array.markers.append(text) # type: ignore
-        self._s_marker_pub.publish(s_marker_array)
-        self._s_marker_id += 1
-        self._last_s_published = s
-
-    # def _get_ref_vel(self, current_wp_id: int) -> float:
-    #     if self._ref_vel_config is None:
-    #         raise ValueError("Reference velocity config is not loaded.")
-
-    #     # セクションの始点となる waypoint ID を昇順にソート
-    #     sorted_keys = sorted(self._ref_vel_config.keys())
-    #     num_keys = len(sorted_keys)
-
-    #     for i in range(num_keys):
-    #         start = sorted_keys[i]
-    #         end = sorted_keys[(i + 1) % num_keys]  # 次のキー。最後は最初のキーに戻る
-    #         target_speed = self._ref_vel_config[start]
-
-    #         if start <= end:
-    #             # セクションが通常の順序の場合
-    #             if start <= current_wp_id < end:
-    #                 return target_speed
-    #         else:
-    #             # セクションがコースを一周する場合
-    #             if current_wp_id >= start or current_wp_id < end:
-    #                 return target_speed
-
-    #     # どのセクションにも該当しない場合 (通常はここには到達しない)
-    #     raise ValueError("Current waypoint ID does not fall into any section.")
-
-
     def _control(self):
         now = self.get_clock().now()
         t = (now - self._t_start).nanoseconds / 1e9
@@ -783,24 +725,12 @@ class MPCController(Node):
             u, max_delta = self._mpc.get_control()
             # self.get_logger().info(f"u: {u}")
 
-        # 速度制限を動的に変更する例
-        # print(t, self._car.s)
-        # スタート付近が s == 26.70
-        # if t > 20.0:
-        #     self._mpc.update_vmax(kmh_to_m_per_sec(30.0))
-        # elif t > 10.0:
-        #     self._mpc.update_vmax(kmh_to_m_per_sec(20.0))
-        # else:
-        #     self._mpc.update_vmax(kmh_to_m_per_sec(10.0))
         if self._ref_vel_configulator is not None:
             ref_vel_mps = self._ref_vel_configulator.get_ref_vel(self._mpc.model.wp_id)
             ref_vel_kmph = kmh_to_m_per_sec(ref_vel_mps)
             self._mpc.update_v_max(ref_vel_kmph)
             v_ref: List[float] = [ref_vel_kmph] * len(self._reference_path.waypoints)
             self._reference_path.set_v_ref(v_ref)
-
-        if self._cfg.common.publish_s_marker: # type: ignore
-            self._publish_s_marker(self._car.s)
 
         # override by brake command if control is disabled
         if not self._enable_control:
@@ -876,7 +806,9 @@ class MPCController(Node):
         self._car.update_states(pose.x, pose.y, pose.theta)
         self._car.update_reference_path(self._car.reference_path)
 
-        # self._publish_ref_path_marker(self._car.reference_path)
+        if self._ref_vel_configulator is None:
+            self._publish_ref_path_marker(self._car.reference_path)
+
         self._pred_marker_color = CYAN
 
         # for i in range(10):
