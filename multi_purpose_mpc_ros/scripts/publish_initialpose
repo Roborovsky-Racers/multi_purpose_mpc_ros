@@ -8,9 +8,6 @@ import rclpy
 from rclpy.parameter import Parameter
 from geometry_msgs.msg import PoseWithCovarianceStamped
 
-# Project
-from multi_purpose_mpc_ros.common import parse_args_without_ros
-
 
 def main(argv = sys.argv) -> None:
 

@@ -21,7 +21,7 @@ from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 
 from std_msgs.msg import Empty, Bool, Float32MultiArray, Float64MultiArray, Int32
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Quaternion, Pose2D, Point
+from geometry_msgs.msg import Quaternion, Pose2D, Point, Vector3
 from std_msgs.msg import ColorRGBA
 
 from rcl_interfaces.msg import SetParametersResult
@@ -36,7 +36,7 @@ from multi_purpose_mpc_ros.core.map import Map, Obstacle
 from multi_purpose_mpc_ros.core.reference_path import ReferencePath
 from multi_purpose_mpc_ros.core.spatial_bicycle_models import BicycleModel
 from multi_purpose_mpc_ros.core.MPC import MPC
-from multi_purpose_mpc_ros.core.utils import load_waypoints, m_per_sec_to_kmh, kmh_to_m_per_sec, load_ref_path
+from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec, load_ref_path
 
 # Project
 from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
@@ -44,23 +44,12 @@ from multi_purpose_mpc_ros.simulation_logger import SimulationLogger
 from multi_purpose_mpc_ros.obstacle_manager import ObstacleManager
 from multi_purpose_mpc_ros.exexution_stats import ExecutionStats
 from multi_purpose_mpc_ros_msgs.msg import AckermannControlBoostCommand, PathConstraints, BorderCells
+from multi_purpose_mpc_ros.tools.reference_velocity_configulator import ReferenceVelocityConfigulator
 
 
-RED = ColorRGBA()
-RED.a = 1.0
-RED.r = 1.0
-RED.g = 0.0
-RED.b = 0.0
-YELLOW = ColorRGBA()
-YELLOW.a = 1.0
-YELLOW.r = 1.0
-YELLOW.g = 1.0
-YELLOW.b = 0.0
-CYAN = ColorRGBA()
-CYAN.a = 1.0
-CYAN.r = 0.0
-CYAN.g = 156.0 / 255.0
-CYAN.b = 209.0 / 255.0
+RED = ColorRGBA(r=1.0, g=0.0, b=0.0, a=1.0)
+YELLOW = ColorRGBA(r=1.0, g=1.0, b=0.0, a=1.0)
+CYAN = ColorRGBA(r=0.0, g=156.0 / 255.0, b=209.0 / 255.0, a=1.0)
 
 def array_to_ackermann_control_command(stamp, u: np.ndarray, acc: float) -> AckermannControlCommand:
     msg = AckermannControlCommand()
@@ -132,7 +121,7 @@ class MPCController(Node):
 
     KP = 100.0
 
-    def __init__(self, config_path: str) -> None:
+    def __init__(self, config_path: str, ref_vel_config_path: Optional[str]) -> None:
         super().__init__("mpc_controller") # type: ignore
 
         # declare parameters
@@ -147,6 +136,7 @@ class MPCController(Node):
         self.use_stats = self.get_parameter("use_stats").get_parameter_value().bool_value
 
         self._config_path = config_path
+        self._ref_vel_config_path: Optional[str] = ref_vel_config_path
         self._cfg = self._load_config()
         self._odom: Optional[Odometry] = None
         self._enable_control = True
@@ -191,6 +181,15 @@ class MPCController(Node):
                 "----- config.yaml -----\n"+
                 config_content + "\n" +
                 "-----------------------")
+
+        if self._ref_vel_config_path is not None:
+            with open(self._ref_vel_config_path, "r") as f:
+                ref_vel_config_content = f.read()
+                self.get_logger().info(
+                    "\n" +
+                    "----- ref_vel.yaml -----\n"+
+                    ref_vel_config_content + "\n" +
+                    "-----------------------")
 
         with open(self._config_path, "r") as f:
             cfg: NamedTuple = convert_to_namedtuple(yaml.safe_load(f)) # type: ignore
@@ -435,11 +434,18 @@ class MPCController(Node):
                 "v_min": 0.0, "v_max": mpc_config.v_max, "ay_max": mpc_config.ay_max}
             car.reference_path.compute_speed_profile(speed_profile_constraints)
 
+        def create_ref_vel_configulator() -> Optional[ReferenceVelocityConfigulator]:
+            if self._ref_vel_config_path is None:
+                return None
+            return ReferenceVelocityConfigulator(self, self._config_path, self._ref_vel_config_path)
+
         self._map = create_map()
         self._reference_path = create_ref_path(self._map)
         self._car = create_car(self._reference_path)
         self._mpc_cfg, self._mpc = create_mpc(self._car)
         compute_speed_profile(self._car, self._mpc_cfg)
+
+        self._ref_vel_configulator: Optional[ReferenceVelocityConfigulator] = create_ref_vel_configulator()
 
         self._trajectory: Optional[Trajectory] = None
         self._path_constraints = None
@@ -664,9 +670,7 @@ class MPCController(Node):
         m_base.type = Marker.SPHERE
         m_base.action = Marker.ADD
         m_base.pose.position.z = 0.0
-        m_base.scale.x = 0.5
-        m_base.scale.y = 0.5
-        m_base.scale.z = 0.5
+        m_base.scale = Vector3(x=0.5, y=0.5, z=0.5)
         m_base.color = self._pred_marker_color
         for i in range(len(x_pred)):
             m = copy.deepcopy(m_base)
@@ -678,7 +682,10 @@ class MPCController(Node):
         self._mpc_pred_pub_dummy.publish(pred_marker_array)
 
     def _publish_ref_path_marker(self, ref_path: ReferencePath):
+        WP_SPHERE_ENABLED = False
+
         ref_path_marker_array = MarkerArray()
+
         m_base = Marker()
         m_base.header.frame_id = "map"
         m_base.ns = "ref_path"
@@ -686,23 +693,8 @@ class MPCController(Node):
         m_base.action = Marker.ADD
         m_base.pose.position.z = 0.0
         m_base.scale.x = 0.2
-        m_base.color.a = 0.7
-        m_base.color.r = 0.0
-        m_base.color.g = 0.0
-        m_base.color.b = 1.0
-        spheres = Marker()
-        spheres.header.frame_id = "map"
-        spheres.ns = "ref_path_point"
-        spheres.type = Marker.SPHERE_LIST
-        spheres.action = Marker.ADD
-        radius = 0.2
-        spheres.scale.x = radius
-        spheres.scale.y = radius
-        spheres.scale.z = radius
-        spheres.color.a = 0.7
-        spheres.color.r = 1.0
-        spheres.color.g = 1.0
-        spheres.color.b = 0.0
+        m_base.color = ColorRGBA(r=0.0, g=0.0, b=1.0, a=0.7)
+
         for i in range(len(ref_path.waypoints) - 1):
             m = copy.deepcopy(m_base)
             m.id = i
@@ -716,12 +708,22 @@ class MPCController(Node):
             m.points.append(end) # type: ignore
             ref_path_marker_array.markers.append(m) # type: ignore
 
-            p = Point()
-            p.x = ref_path.waypoints[i].x
-            p.y = ref_path.waypoints[i].y
-            p.z = 0.
-            spheres.points.append(p) #type: ignore
-        ref_path_marker_array.markers.append(spheres) # type: ignore
+        if WP_SPHERE_ENABLED:
+            spheres = Marker()
+            spheres.header.frame_id = "map"
+            spheres.ns = "ref_path_point"
+            spheres.type = Marker.SPHERE_LIST
+            spheres.action = Marker.ADD
+            radius = 0.2
+            spheres.scale = Vector3(x=radius, y=radius, z=radius)
+            spheres.color = ColorRGBA(r=1.0, g=1.0, b=0.0, a=0.7)
+            for i in range(len(ref_path.waypoints) - 1):
+                p = Point()
+                p.x = ref_path.waypoints[i].x
+                p.y = ref_path.waypoints[i].y
+                p.z = 0.
+                spheres.points.append(p) #type: ignore
+            ref_path_marker_array.markers.append(spheres) # type: ignore
 
         self._ref_path_pub.publish(ref_path_marker_array)
         self._ref_path_pub_dummy.publish(ref_path_marker_array)
@@ -788,16 +790,12 @@ class MPCController(Node):
             u, max_delta = self._mpc.get_control()
             # self.get_logger().info(f"u: {u}")
 
-        # 速度制限を動的に変更する例
-        # print(t, self._car.s)
-        # スタート付近が s == 26.70
-        # if t > 20.0:
-        #     self._mpc.update_vmax(kmh_to_m_per_sec(30.0))
-        # elif t > 10.0:
-        #     self._mpc.update_vmax(kmh_to_m_per_sec(20.0))
-        # else:
-        #     self._mpc.update_vmax(kmh_to_m_per_sec(10.0))
-
+        if self._ref_vel_configulator is not None:
+            ref_vel_mps = self._ref_vel_configulator.get_ref_vel(self._mpc.model.wp_id)
+            ref_vel_kmph = kmh_to_m_per_sec(ref_vel_mps)
+            self._mpc.update_v_max(ref_vel_kmph)
+            v_ref: List[float] = [ref_vel_kmph] * len(self._reference_path.waypoints)
+            self._reference_path.set_v_ref(v_ref)
 
         # override by brake command if control is disabled
         if not self._enable_control:
@@ -872,7 +870,9 @@ class MPCController(Node):
         self._car.update_states(pose.x, pose.y, pose.theta)
         self._car.update_reference_path(self._car.reference_path)
 
-        self._publish_ref_path_marker(self._car.reference_path)
+        if self._ref_vel_configulator is None:
+            self._publish_ref_path_marker(self._car.reference_path)
+
         self._pred_marker_color = CYAN
 
         # for i in range(10):

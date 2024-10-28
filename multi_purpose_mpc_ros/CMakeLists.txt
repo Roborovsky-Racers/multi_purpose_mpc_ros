@@ -32,6 +32,7 @@ install(PROGRAMS
   scripts/run_mpc_controller.bash
   scripts/run_mpc_simulation.bash
   scripts/run_reference_path_visualizer.bash
+  scripts/run_reference_velocity_configulator.bash
   scripts/path_constraints_provider.bash
   scripts/mpc_controller
   scripts/mpc_simulation
@@ -39,6 +40,7 @@ install(PROGRAMS
   scripts/path_constraints_provider
   scripts/publish_initialpose
   scripts/reference_path_visualizer
+  scripts/reference_velocity_configulator
   DESTINATION lib/${PROJECT_NAME}
 )
 
