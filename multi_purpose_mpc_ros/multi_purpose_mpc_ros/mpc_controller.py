@@ -603,7 +603,7 @@ class MPCController(Node):
             self._current_laps = 1 if laps == 0 else laps
 
         if laps > self._current_laps:
-            self.get_logger().info(f'Lap {self._current_laps} completed! Lap time: {self._last_lap_time} s')
+            self.get_logger().info(f'\033[32mLap {self._current_laps} completed! Lap time: {self._last_lap_time} s\033[0m')
             self._lap_times[self._current_laps] = self._last_lap_time
             self._current_laps = laps
 
