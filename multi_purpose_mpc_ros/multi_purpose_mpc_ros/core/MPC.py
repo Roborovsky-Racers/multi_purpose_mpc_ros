@@ -280,7 +280,7 @@ class MPC:
             self.infeasibility_counter = 0
             self.last_solved_wp_id = self.model.wp_id
 
-        except Exception as e:
+        except TypeError or ValueError:
             id = nu * (self.infeasibility_counter + 1)
             if id + 2 < len(self.current_control):
                 u = np.array(self.current_control[id:id+2])
@@ -291,7 +291,7 @@ class MPC:
 
             self.infeasibility_counter += 1
 
-        if self.infeasibility_counter > (N - 1) and self.infeasibility_counter % 1000 == 0:
+        if self.infeasibility_counter > (N - 1) and self.infeasibility_counter % 100 == 0:
             print('No control signal computed!')
 
         return u, max_delta
