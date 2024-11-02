@@ -6,7 +6,7 @@ sim_logger:
 
 map:
   # path from pkg share dir
-  yaml_path: "env/final_ver2/occupancy_grid_map.yaml"
+  yaml_path: "env/final_ver3/occupancy_grid_map.yaml"
 
 waypoints:
   # path from pkg share dir
@@ -23,7 +23,7 @@ reference_path:
   update_by_topic: false # When true, 'circle' must be false
   # path from pkg share dir
   csv_path: ""
-  csv_path: "env/final_ver2/traj_mincurv.csv"
+  csv_path: "env/final_ver3/traj_mincurv.csv"
   resolution: 0.6
   smoothing_distance: 2
   max_width: 6.0
@@ -43,8 +43,8 @@ mpc:
   # Q: [e_y, e_psi, t]
   # R: [v, delta]
   # QN: [e_y, e_psi, t]
-  Q: [1000000.0, 100000000.0, 0.0]
-  QN: [1000000.0, 1000.0, 0.0]
+  Q: [1000000.0, 100000000.0, 1000000.0]
+  QN: [1000000.0, 1000.0, 30000.0]
   R: [100000.0, 0.0]
   v_max: 30.0 # km/h
   a_min: -1.6 # m/s^2
