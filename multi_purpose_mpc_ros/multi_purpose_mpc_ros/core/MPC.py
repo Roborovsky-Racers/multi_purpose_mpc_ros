@@ -78,7 +78,7 @@ class MPC:
     def update_QN(self, QN: np.ndarray):
         self.QN = QN
 
-    def _init_problem(self, N, safety_margin, force_update_dynamic_constraints=False):
+    def _init_problem(self, N, safety_margin):
         """
         Initialize optimization problem for current time step with steering rate constraints.
         """
@@ -137,20 +137,26 @@ class MPC:
             umax_dyn[self.nu*n] = min(vmax_dyn, umax_dyn[self.nu*n])
 
         # Update path constraints
-        if force_update_dynamic_constraints:
-            ub, lb = self.model.reference_path.update_simple_path_constraints_horizon(
-                self.model.wp_id + 1, N, safety_margin)
-            self.model.reference_path.border_cells.current_wp_id = self.model.wp_id
-        elif self.use_obstacle_avoidance and not self.use_path_constraints_topic:
+        if self.use_obstacle_avoidance and not self.use_path_constraints_topic:
             ub, lb, _ = self.model.reference_path.update_path_constraints(
                 self.model.wp_id + 1,
                 [self.model.temporal_state.x, self.model.temporal_state.y, self.model.temporal_state.psi],
                 N, self.model.length, self.model.width, safety_margin)
         else:
-            wp_id = min(self.model.wp_id, len(self.model.reference_path.path_constraints[0]) - 1)
-            ub = self.model.reference_path.path_constraints[0][wp_id]
-            lb = self.model.reference_path.path_constraints[1][wp_id]
-            self.model.reference_path.border_cells.current_wp_id = wp_id
+            ref_wp_id = (self.model.wp_id + 1) % len(self.model.reference_path.path_constraints[0])
+            ub = self.model.reference_path.path_constraints[0][ref_wp_id]
+            lb = self.model.reference_path.path_constraints[1][ref_wp_id]
+            self.model.reference_path.border_cells.current_wp_id = ref_wp_id
+
+            # Update safety margin if provided as argument and different from current value
+            if self.model.safety_margin != safety_margin:
+                safety_margin_diff = safety_margin - self.model.safety_margin
+                ub -= safety_margin_diff
+                lb += safety_margin_diff
+
+                infeasible_index = ub < lb
+                ub[infeasible_index] = 0.0
+                lb[infeasible_index] = 0.0
 
         # Update dynamic state constraints
         xmin_dyn[0] = xmax_dyn[0] = self.model.spatial_state.e_y
@@ -243,7 +249,7 @@ class MPC:
             if not np.all(use_control_signals):
                 for i in range(1, 6):
                     relaxed_safety_margin = self.model.safety_margin * ((5-i) / 5.0)
-                    self._init_problem(N, relaxed_safety_margin, force_update_dynamic_constraints=True)
+                    self._init_problem(N, relaxed_safety_margin)
                     dec = self.optimizer.solve()
                     control_signals = np.array(dec.x[-N*nu:])
                     use_control_signals = control_signals[1::2]
