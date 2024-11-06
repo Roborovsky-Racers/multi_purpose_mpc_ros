@@ -15,7 +15,7 @@ ref_vel_configulator:
     ref_vel: 30.0
     wp_id: 190
   s6:
-    ref_vel: 20.0
+    ref_vel: 22.0
     wp_id: 265
   s7:
     ref_vel: 30.0
