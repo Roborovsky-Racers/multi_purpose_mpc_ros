@@ -133,7 +133,9 @@ class MPC:
             uq[n * self.nx:(n+1)*self.nx] = B_lin.dot([v_ref, kappa_ref]) - f
 
             # Constrain maximum speed based on curvature
-            vmax_dyn = np.sqrt(self.ay_max / (np.abs(kappa_pred[n]) + 1e-12))
+            max_kappa_pred = np.max(np.abs(kappa_pred[n:]))
+            vmax_dyn = np.sqrt(self.ay_max / (np.abs(max_kappa_pred) + 1e-12))
+            # vmax_dyn = np.sqrt(self.ay_max / (np.abs(kappa_pred[n]) + 1e-12))
             umax_dyn[self.nu*n] = min(vmax_dyn, umax_dyn[self.nu*n])
 
         # Update path constraints
