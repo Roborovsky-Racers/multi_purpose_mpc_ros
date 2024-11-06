@@ -107,7 +107,7 @@ class MPC:
         umax_dyn = np.kron(np.ones(N), umax)
 
         # Get curvature predictions
-        kappa_pred = np.tan(np.array(self.current_control[3:] + self.current_control[-1:])) / self.model.length
+        kappa_pred = np.tan(np.append(np.array(self.current_control[3::self.nu]), self.current_control[-1])) / self.model.length
 
         # Consider control delay
         self.model.wp_id += self.wp_id_offset
