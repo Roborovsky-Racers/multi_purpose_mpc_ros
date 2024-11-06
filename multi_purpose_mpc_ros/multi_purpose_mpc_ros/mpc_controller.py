@@ -792,7 +792,9 @@ class MPCController(Node):
 
         if self._ref_vel_configulator is not None:
             ref_vel_mps = self._ref_vel_configulator.get_ref_vel(self._mpc.model.wp_id)
-            ref_vel_kmph = kmh_to_m_per_sec(ref_vel_mps)
+            ref_vel_kmph = min(
+                kmh_to_m_per_sec(ref_vel_mps),
+                self._mpc_cfg.v_max)
             self._mpc.update_v_max(ref_vel_kmph)
             v_ref: List[float] = [ref_vel_kmph] * len(self._reference_path.waypoints)
             self._reference_path.set_v_ref(v_ref)
