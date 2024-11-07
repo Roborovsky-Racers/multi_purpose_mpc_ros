@@ -105,6 +105,7 @@ class MPCConfig:
     accel_low_pass_gain: float
     steer_low_pass_gain: float
     wp_id_offset: int
+    use_max_kappa_pred: bool
 
 
 class MPCController(Node):
@@ -399,7 +400,8 @@ class MPCController(Node):
                 cfg_mpc.steering_tire_angle_gain_var,
                 cfg_mpc.accel_low_pass_gain,
                 cfg_mpc.steer_low_pass_gain,
-                cfg_mpc.wp_id_offset)
+                cfg_mpc.wp_id_offset,
+                cfg_mpc.use_max_kappa_pred)
 
             state_constraints = {
                 "xmin": np.array([-np.inf, -np.inf, -np.inf]),
@@ -424,7 +426,8 @@ class MPCController(Node):
                 scaled_steer_rate_max,
                 mpc_cfg.wp_id_offset,
                 self.USE_OBSTACLE_AVOIDANCE,
-                self._cfg.reference_path.use_path_constraints_topic)
+                self._cfg.reference_path.use_path_constraints_topic,
+                mpc_cfg.use_max_kappa_pred)
 
             return mpc_cfg, mpc
 

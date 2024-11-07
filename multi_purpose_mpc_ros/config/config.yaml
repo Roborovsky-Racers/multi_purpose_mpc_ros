@@ -57,6 +57,7 @@ mpc:
   accel_low_pass_gain: 1.0
   steer_low_pass_gain: 1.0
   wp_id_offset: 2
+  use_max_kappa_pred: true
 
   ## --- 高速 --- ##
   # v_max: 30.0 # km/h

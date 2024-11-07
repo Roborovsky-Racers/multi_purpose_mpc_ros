@@ -13,7 +13,7 @@ PREDICTION = '#BA4A00'
 
 class MPC:
     def __init__(self, model, N, Q, R, QN, StateConstraints, InputConstraints,
-                 ay_max, max_steering_rate, wp_id_offset, use_obstacle_avoidance, use_path_constraints_topic):
+                 ay_max, max_steering_rate, wp_id_offset, use_obstacle_avoidance, use_path_constraints_topic, use_max_kappa_pred=True):
         """
         Constructor for the Model Predictive Controller.
         :param model: bicycle model object to be controlled
@@ -47,7 +47,9 @@ class MPC:
         # 追加: ステアリングレート制限関連のパラメータ
         self.max_steering_rate = max_steering_rate
         self.previous_steering = 0.0  # 前回のステア角
-        
+
+        # 追加: ay_maxによる速度制限の方式切り替え
+        self.use_max_kappa_pred = use_max_kappa_pred
         # 既存の初期化
         self.current_prediction = None
         self.infeasibility_counter = 0
@@ -133,9 +135,11 @@ class MPC:
             uq[n * self.nx:(n+1)*self.nx] = B_lin.dot([v_ref, kappa_ref]) - f
 
             # Constrain maximum speed based on curvature
-            max_kappa_pred = np.max(np.abs(kappa_pred[n:]))
-            vmax_dyn = np.sqrt(self.ay_max / (np.abs(max_kappa_pred) + 1e-12))
-            # vmax_dyn = np.sqrt(self.ay_max / (np.abs(kappa_pred[n]) + 1e-12))
+            if self.use_max_kappa_pred:
+                max_kappa_pred = np.max(np.abs(kappa_pred[n:]))
+                vmax_dyn = np.sqrt(self.ay_max / (np.abs(max_kappa_pred) + 1e-12))
+            else:
+                vmax_dyn = np.sqrt(self.ay_max / (np.abs(kappa_pred[n]) + 1e-12))
             umax_dyn[self.nu*n] = min(vmax_dyn, umax_dyn[self.nu*n])
 
         # Update path constraints
