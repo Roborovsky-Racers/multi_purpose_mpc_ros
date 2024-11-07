@@ -62,8 +62,8 @@ mpc:
   ## ---------- 究極 ------------- ##
   ## Lap1: 53s, Lap2: 47s
 
-  # v_max: 30.0 # km/h
-  # ay_max: 12.0# m/s^2, maximum lateral acceleration in curves
+  # v_max: 30.0   # km/h
+  # ay_max: 12.0  # m/s^2, maximum lateral acceleration in curves
   # Q: [600000.0, 100000000.0, 2000000.0]
   # QN: [1000000.0, 1000000.0, 10000.0]
 
