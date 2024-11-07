@@ -134,7 +134,7 @@ class MPC:
 
             # Constrain maximum speed based on curvature
             max_kappa_pred = np.max(np.abs(kappa_pred[n:]))
-            vmax_dyn = np.sqrt(self.ay_max / (np.abs(max_kappa_pred) + 1e-12))
+            vmax_dyn = np.sqrt(self.ay_max / (max_kappa_pred + 1e-12))
             # vmax_dyn = np.sqrt(self.ay_max / (np.abs(kappa_pred[n]) + 1e-12))
             umax_dyn[self.nu*n] = min(vmax_dyn, umax_dyn[self.nu*n])
 
