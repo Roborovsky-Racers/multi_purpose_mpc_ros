@@ -43,7 +43,7 @@ class MPC:
         self.state_constraints = StateConstraints
         self.input_constraints = InputConstraints
         self.ay_max = ay_max
-        
+
         # 追加: ステアリングレート制限関連のパラメータ
         self.max_steering_rate = max_steering_rate
         self.previous_steering = 0.0  # 前回のステア角
@@ -269,7 +269,7 @@ class MPC:
             control_signals[1::2] = np.arctan(control_signals[1::2] * self.model.length)
             v = control_signals[0]
             delta = control_signals[1]
-            
+
             # ステアレートの制限を適用
             max_delta_change = self.max_steering_rate * self.model.Ts
             delta = np.clip(
