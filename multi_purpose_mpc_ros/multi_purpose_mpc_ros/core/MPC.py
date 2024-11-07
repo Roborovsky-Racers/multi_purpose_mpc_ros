@@ -107,7 +107,7 @@ class MPC:
         umax_dyn = np.kron(np.ones(N), umax)
 
         # Get curvature predictions
-        kappa_pred = np.tan(np.array(self.current_control[3:] + self.current_control[-1:])) / self.model.length
+        kappa_pred = np.tan(np.append(np.array(self.current_control[3::self.nu]), self.current_control[-1])) / self.model.length
 
         # Consider control delay
         self.model.wp_id += self.wp_id_offset
@@ -133,7 +133,9 @@ class MPC:
             uq[n * self.nx:(n+1)*self.nx] = B_lin.dot([v_ref, kappa_ref]) - f
 
             # Constrain maximum speed based on curvature
-            vmax_dyn = np.sqrt(self.ay_max / (np.abs(kappa_pred[n]) + 1e-12))
+            max_kappa_pred = np.max(np.abs(kappa_pred[n:]))
+            vmax_dyn = np.sqrt(self.ay_max / (max_kappa_pred + 1e-12))
+            # vmax_dyn = np.sqrt(self.ay_max / (np.abs(kappa_pred[n]) + 1e-12))
             umax_dyn[self.nu*n] = min(vmax_dyn, umax_dyn[self.nu*n])
 
         # Update path constraints
