@@ -39,6 +39,7 @@ install(PROGRAMS
   scripts/obstacle_parser.py
   scripts/path_constraints_provider
   scripts/publish_initialpose
+  scripts/publish_initialpose_gnss
   scripts/reference_path_visualizer
   scripts/reference_velocity_configulator
   DESTINATION lib/${PROJECT_NAME}
