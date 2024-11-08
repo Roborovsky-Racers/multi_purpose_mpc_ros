@@ -2,6 +2,9 @@ ref_vel_configulator:
   s1:
     ref_vel: 30.0
     wp_id: 1
+  s1_1:
+    ref_vel: 30.0
+    wp_id: 30
   s2:
     ref_vel: 30.0
     wp_id: 55
